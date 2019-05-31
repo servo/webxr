@@ -16,3 +16,7 @@ but adapted to Rust design patterns.'''
 
 [lib]
 path = "lib.rs"
+
+[dependencies]
+euclid = "0.19"
+gleam = "0.6"
