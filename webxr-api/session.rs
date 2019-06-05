@@ -4,8 +4,13 @@
 
 use crate::Device;
 use crate::Error;
+use crate::Floor;
 use crate::Frame;
+use crate::Native;
+use crate::Views;
 use crate::WebGLContextId;
+
+use euclid::TypedRigidTransform3D;
 
 use gleam::gl::Gl;
 
@@ -42,10 +47,20 @@ enum SessionMsg {
 /// This is owned by the content thread.
 /// https://www.w3.org/TR/webxr/#xrsession-interface
 pub struct Session {
+    floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
+    views: Views,
     sender: Sender<SessionMsg>,
 }
 
 impl Session {
+    pub fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor> {
+        self.floor_transform.clone()
+    }
+
+    pub fn views(&self) -> Views {
+        self.views.clone()
+    }
+
     pub fn request_animation_frame(&mut self, callback: FrameRequestCallback) {
         let _ = self
             .sender
@@ -68,8 +83,14 @@ pub struct SessionThread<D> {
 
 impl<D: Device> SessionThread<D> {
     pub fn new_session(&mut self) -> Session {
+        let floor_transform = self.device.floor_transform();
+        let views = self.device.views();
         let sender = self.sender.clone();
-        Session { sender }
+        Session {
+            floor_transform,
+            views,
+            sender,
+        }
     }
 
     pub fn run(&mut self) {

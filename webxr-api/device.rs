@@ -2,14 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/// Traits to be implemented by backends
+//! Traits to be implemented by backends
+
 use crate::Error;
+use crate::Floor;
 use crate::Frame;
+use crate::Native;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
+use crate::Views;
 
 use euclid::Size2D;
+use euclid::TypedRigidTransform3D;
 
 /// A trait for discovering XR devices
 pub trait Discovery: 'static {
@@ -19,6 +24,12 @@ pub trait Discovery: 'static {
 
 /// A trait for using an XR device
 pub trait Device {
+    /// The transform from native coordinates to the floor.
+    fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor>;
+
+    /// The transforms from viewer coordinates to the eyes.
+    fn views(&self) -> Views;
+
     /// This method should block waiting for the next frame,
     /// and return the information for it.
     fn wait_for_animation_frame(&mut self) -> Frame;
