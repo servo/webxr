@@ -4,9 +4,6 @@
 
 //! This crate defines the Rust API for WebXR. It is implemented by the `webxr` crate.
 
-extern crate euclid;
-extern crate gleam;
-
 mod device;
 mod error;
 mod frame;

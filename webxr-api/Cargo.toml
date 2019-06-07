@@ -2,6 +2,7 @@
 name = "webxr-api"
 version = "0.0.1"
 authors = ["The Servo Project Developers"]
+edition = "2018"
 
 homepage = "https://github.com/servo/webxr"
 repository = "https://github.com/servo/webxr"
