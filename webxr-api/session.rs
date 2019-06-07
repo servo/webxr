@@ -23,7 +23,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 /// https://www.w3.org/TR/webxr/#xrsessionmode-enum
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionMode {
     Inline,
     ImmersiveVR,
