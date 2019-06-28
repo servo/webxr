@@ -10,3 +10,6 @@ before_script:
 script:
   - cargo fmt --all -- --check
   - cargo build
+
+notifications:
+  webhooks: http://build.servo.org:54856/travis
