@@ -7,6 +7,7 @@
 mod device;
 mod error;
 mod frame;
+mod registry;
 mod session;
 mod view;
 mod webgl;
@@ -17,6 +18,8 @@ pub use device::Discovery;
 pub use error::Error;
 
 pub use frame::Frame;
+
+pub use registry::Registry;
 
 pub use session::FrameRequestCallback;
 pub use session::HighResTimeStamp;
@@ -34,4 +37,4 @@ pub use view::View;
 pub use view::Viewer;
 pub use view::Views;
 
-pub use webgl::WebGLContextId;
+pub use webgl::WebGLExternalImageApi;

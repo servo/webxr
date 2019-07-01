@@ -16,8 +16,10 @@ use crate::Views;
 use euclid::Size2D;
 use euclid::TypedRigidTransform3D;
 
+use gleam::gl::GLsync;
+
 /// A trait for discovering XR devices
-pub trait Discovery: 'static {
+pub trait Discovery: 'static + Send {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
 }
@@ -36,6 +38,6 @@ pub trait Device {
 
     /// This method should render a GL texture to the device.
     /// While this method is being called, the device has unique access
-    /// to the texture.
-    fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>);
+    /// to the texture. The texture should be sync'd using glWaitSync before being used.
+    fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>, sync: GLsync);
 }
