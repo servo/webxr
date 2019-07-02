@@ -4,16 +4,19 @@
 
 use crate::Discovery;
 use crate::Error;
+use crate::Receiver;
+use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
 
-use std::sync::mpsc;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
 use std::thread;
 
+#[cfg(feature = "ipc")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Registry {
     sender: Sender<RegistryMsg>,
 }
@@ -23,13 +26,19 @@ pub struct RegistryThread {
     receiver: Receiver<RegistryMsg>,
 }
 
-pub type SessionSupportCallback = Box<dyn 'static + FnOnce(Result<(), Error>) + Send>;
+#[cfg_attr(feature = "ipc", typetag::serde)]
+pub trait SessionSupportCallback: 'static + Send {
+    fn callback(&mut self, result: Result<(), Error>);
+}
 
-pub type SessionRequestCallback = Box<dyn 'static + FnOnce(Result<Session, Error>) + Send>;
+#[cfg_attr(feature = "ipc", typetag::serde)]
+pub trait SessionRequestCallback: 'static + Send {
+    fn callback(&mut self, result: Result<Session, Error>);
+}
 
 impl Registry {
-    pub fn new() -> Registry {
-        let (sender, receiver) = mpsc::channel();
+    pub fn new() -> Result<Registry, Error> {
+        let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let mut thread = RegistryThread {
             receiver,
@@ -37,23 +46,29 @@ impl Registry {
         };
         let registry = Registry { sender };
         thread::spawn(move || thread.run());
-        registry
+        Ok(registry)
     }
 
     pub fn register<D: Discovery>(&mut self, discovery: D) {
         let _ = self.sender.send(RegistryMsg::Register(Box::new(discovery)));
     }
 
-    pub fn supports_session(&mut self, mode: SessionMode, callback: SessionSupportCallback) {
+    pub fn supports_session<C>(&mut self, mode: SessionMode, callback: C)
+    where
+        C: SessionSupportCallback,
+    {
         let _ = self
             .sender
-            .send(RegistryMsg::SupportsSession(mode, callback));
+            .send(RegistryMsg::SupportsSession(mode, Box::new(callback)));
     }
 
-    pub fn request_session(&mut self, mode: SessionMode, callback: SessionRequestCallback) {
+    pub fn request_session<C>(&mut self, mode: SessionMode, callback: C)
+    where
+        C: SessionRequestCallback,
+    {
         let _ = self
             .sender
-            .send(RegistryMsg::RequestSession(mode, callback));
+            .send(RegistryMsg::RequestSession(mode, Box::new(callback)));
     }
 }
 
@@ -64,30 +79,31 @@ impl RegistryThread {
                 RegistryMsg::Register(discovery) => {
                     self.discoveries.push(discovery);
                 }
-                RegistryMsg::SupportsSession(mode, callback) => {
+                RegistryMsg::SupportsSession(mode, mut callback) => {
                     for discovery in &self.discoveries {
                         if discovery.supports_session(mode) {
-                            return callback(Ok(()));
+                            return callback.callback(Ok(()));
                         }
                     }
-                    return callback(Err(Error::NoMatchingDevice));
+                    return callback.callback(Err(Error::NoMatchingDevice));
                 }
-                RegistryMsg::RequestSession(mode, callback) => {
+                RegistryMsg::RequestSession(mode, mut callback) => {
                     for discovery in &mut self.discoveries {
                         let xr = SessionBuilder::new();
                         if let Ok(session) = discovery.request_session(mode, xr) {
-                            return callback(Ok(session));
+                            return callback.callback(Ok(session));
                         }
                     }
-                    return callback(Err(Error::NoMatchingDevice));
+                    return callback.callback(Err(Error::NoMatchingDevice));
                 }
             }
         }
     }
 }
 
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum RegistryMsg {
     Register(Box<dyn Discovery>),
-    RequestSession(SessionMode, SessionRequestCallback),
-    SupportsSession(SessionMode, SessionSupportCallback),
+    RequestSession(SessionMode, Box<dyn SessionRequestCallback>),
+    SupportsSession(SessionMode, Box<dyn SessionSupportCallback>),
 }

@@ -20,6 +20,7 @@ path = "lib.rs"
 
 [features]
 glwindow = ["glutin"]
+ipc = ["webxr-api/ipc"]
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }
