@@ -38,3 +38,20 @@ pub use view::Viewer;
 pub use view::Views;
 
 pub use webgl::WebGLExternalImageApi;
+
+#[cfg(feature = "ipc")]
+pub use ipc_channel::ipc::IpcSender as Sender;
+
+#[cfg(feature = "ipc")]
+pub use ipc_channel::ipc::IpcReceiver as Receiver;
+
+#[cfg(feature = "ipc")]
+pub use ipc_channel::ipc::channel;
+
+#[cfg(not(feature = "ipc"))]
+pub use std::sync::mpsc::{Receiver, Sender};
+
+#[cfg(not(feature = "ipc"))]
+fn channel<T>() -> Result<(Sender<T>, Receiver<T>), ()> {
+    Ok(std::sync::mpsc::channel())
+}

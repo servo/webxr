@@ -10,6 +10,7 @@ use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 
 /// A trait to get access a GL texture from a WebGL context.
+#[cfg_attr(feature = "ipc", typetag::serde)]
 pub trait WebGLExternalImageApi: 'static + Send {
     /// Lock the WebGL context, and get back a texture id, the size of the texture,
     /// and a sync object for the texture.

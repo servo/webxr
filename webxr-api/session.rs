@@ -7,19 +7,22 @@ use crate::Error;
 use crate::Floor;
 use crate::Frame;
 use crate::Native;
+use crate::Receiver;
+use crate::Sender;
 use crate::Views;
 use crate::WebGLExternalImageApi;
 
 use euclid::TypedRigidTransform3D;
 
 use std::cell::Cell;
-use std::sync::mpsc;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
 use std::thread;
+
+#[cfg(feature = "ipc")]
+use serde::{Deserialize, Serialize};
 
 /// https://www.w3.org/TR/webxr/#xrsessionmode-enum
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum SessionMode {
     Inline,
     ImmersiveVR,
@@ -30,18 +33,23 @@ pub enum SessionMode {
 pub type HighResTimeStamp = f64;
 
 /// https://www.w3.org/TR/webxr/#callbackdef-xrframerequestcallback
-pub type FrameRequestCallback = Box<dyn 'static + FnOnce(HighResTimeStamp, Frame) + Send>;
+#[cfg_attr(feature = "ipc", typetag::serde)]
+pub trait FrameRequestCallback: 'static + Send {
+    fn callback(&mut self, time: HighResTimeStamp, frame: Frame);
+}
 
 // The messages that are sent from the content thread to the session thread.
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
     UpdateWebGLExternalImageApi(Box<dyn WebGLExternalImageApi>),
-    RequestAnimationFrame(FrameRequestCallback),
+    RequestAnimationFrame(Box<dyn FrameRequestCallback>),
     RenderAnimationFrame,
 }
 
 /// An object that represents an XR session.
 /// This is owned by the content thread.
 /// https://www.w3.org/TR/webxr/#xrsession-interface
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Session {
     floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
     views: Views,
@@ -66,10 +74,13 @@ impl Session {
             .send(SessionMsg::UpdateWebGLExternalImageApi(Box::new(images)));
     }
 
-    pub fn request_animation_frame(&mut self, callback: FrameRequestCallback) {
+    pub fn request_animation_frame<C>(&mut self, callback: C)
+    where
+        C: FrameRequestCallback,
+    {
         let _ = self
             .sender
-            .send(SessionMsg::RequestAnimationFrame(callback));
+            .send(SessionMsg::RequestAnimationFrame(Box::new(callback)));
     }
 
     pub fn render_animation_frame(&mut self) {
@@ -104,11 +115,11 @@ impl<D: Device> SessionThread<D> {
                 SessionMsg::UpdateWebGLExternalImageApi(images) => {
                     self.images = Some(images);
                 }
-                SessionMsg::RequestAnimationFrame(callback) => {
+                SessionMsg::RequestAnimationFrame(mut callback) => {
                     let timestamp = self.timestamp;
                     let frame = self.device.wait_for_animation_frame();
                     self.timestamp += 1.0;
-                    callback(timestamp, frame);
+                    callback.callback(timestamp, frame);
                 }
                 SessionMsg::RenderAnimationFrame => {
                     if let Some(ref images) = self.images {
@@ -139,17 +150,17 @@ impl SessionBuilder {
 
     /// For devices which want to do their own thread management,
     /// e.g. where the session thread has to be run on the main thread.
-    pub fn new_thread<D: Device>(self, device: D) -> SessionThread<D> {
-        let (sender, receiver) = mpsc::channel();
+    pub fn new_thread<D: Device>(self, device: D) -> Result<SessionThread<D>, Error> {
+        let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let timestamp = 0.0;
         let images = None;
-        SessionThread {
+        Ok(SessionThread {
             sender,
             receiver,
             device,
             images,
             timestamp,
-        }
+        })
     }
 
     /// For devices which are happy to hand over thread management to webxr.
@@ -158,18 +169,19 @@ impl SessionBuilder {
         F: 'static + FnOnce() -> Result<D, Error> + Send,
         D: Device,
     {
-        let (acks, ackr) = mpsc::channel();
-        thread::spawn(move || match factory() {
-            Ok(device) => {
-                let mut thread = self.new_thread(device);
-                let session = thread.new_session();
-                let _ = acks.send(Ok(session));
-                thread.run();
-            }
-            Err(err) => {
-                let _ = acks.send(Err(err));
-            }
-        });
+        let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
+        thread::spawn(
+            move || match factory().and_then(|device| self.new_thread(device)) {
+                Ok(mut thread) => {
+                    let session = thread.new_session();
+                    let _ = acks.send(Ok(session));
+                    thread.run();
+                }
+                Err(err) => {
+                    let _ = acks.send(Err(err));
+                }
+            },
+        );
         ackr.recv().unwrap_or(Err(Error::CommunicationError))
     }
 }
