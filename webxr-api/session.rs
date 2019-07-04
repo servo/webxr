@@ -14,7 +14,6 @@ use crate::WebGLExternalImageApi;
 
 use euclid::TypedRigidTransform3D;
 
-use std::cell::Cell;
 use std::thread;
 
 #[cfg(feature = "ipc")]
@@ -94,10 +93,26 @@ pub struct SessionThread<D> {
     sender: Sender<SessionMsg>,
     images: Option<Box<dyn WebGLExternalImageApi>>,
     timestamp: HighResTimeStamp,
+    running: bool,
     device: D,
 }
 
 impl<D: Device> SessionThread<D> {
+    pub fn new(device: D) -> Result<SessionThread<D>, Error> {
+        let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
+        let timestamp = 0.0;
+        let images = None;
+        let running = true;
+        Ok(SessionThread {
+            sender,
+            receiver,
+            device,
+            images,
+            timestamp,
+            running,
+        })
+    }
+
     pub fn new_session(&mut self) -> Session {
         let floor_transform = self.device.floor_transform();
         let views = self.device.views();
@@ -111,22 +126,26 @@ impl<D: Device> SessionThread<D> {
 
     pub fn run(&mut self) {
         while let Ok(msg) = self.receiver.recv() {
-            match msg {
-                SessionMsg::UpdateWebGLExternalImageApi(images) => {
-                    self.images = Some(images);
-                }
-                SessionMsg::RequestAnimationFrame(mut callback) => {
-                    let timestamp = self.timestamp;
-                    let frame = self.device.wait_for_animation_frame();
-                    self.timestamp += 1.0;
-                    callback.callback(timestamp, frame);
-                }
-                SessionMsg::RenderAnimationFrame => {
-                    if let Some(ref images) = self.images {
-                        if let Ok((texture_id, size, sync)) = images.lock() {
-                            self.device.render_animation_frame(texture_id, size, sync);
-                            images.unlock();
-                        }
+            self.handle_msg(msg);
+        }
+    }
+
+    fn handle_msg(&mut self, msg: SessionMsg) {
+        match msg {
+            SessionMsg::UpdateWebGLExternalImageApi(images) => {
+                self.images = Some(images);
+            }
+            SessionMsg::RequestAnimationFrame(mut callback) => {
+                let timestamp = self.timestamp;
+                let frame = self.device.wait_for_animation_frame();
+                callback.callback(timestamp, frame);
+            }
+            SessionMsg::RenderAnimationFrame => {
+                self.timestamp += 1.0;
+                if let Some(ref images) = self.images {
+                    if let Ok((texture_id, size, sync)) = images.lock() {
+                        self.device.render_animation_frame(texture_id, size, sync);
+                        images.unlock();
                     }
                 }
             }
@@ -134,33 +153,40 @@ impl<D: Device> SessionThread<D> {
     }
 }
 
-/// A type for building XR sessions
-pub struct SessionBuilder {
-    // This field is just used to make the type !Sync and !Send, for futureproofing
-    #[allow(dead_code)]
-    not_sync_or_send: Cell<()>,
+/// Devices that need to can run sessions on the main thread.
+pub trait MainThreadSession: 'static {
+    fn run_one_frame(&mut self);
+    fn running(&self) -> bool;
 }
 
-impl SessionBuilder {
-    pub(crate) fn new() -> SessionBuilder {
-        SessionBuilder {
-            not_sync_or_send: Cell::new(()),
+impl<D: Device> MainThreadSession for SessionThread<D> {
+    fn run_one_frame(&mut self) {
+        let timestamp = self.timestamp;
+        while timestamp == self.timestamp && self.running {
+            if let Ok(msg) = self.receiver.recv() {
+                self.handle_msg(msg);
+            } else {
+                self.running = false;
+            }
+        }
+        while let Ok(msg) = self.receiver.try_recv() {
+            self.handle_msg(msg);
         }
     }
 
-    /// For devices which want to do their own thread management,
-    /// e.g. where the session thread has to be run on the main thread.
-    pub fn new_thread<D: Device>(self, device: D) -> Result<SessionThread<D>, Error> {
-        let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
-        let timestamp = 0.0;
-        let images = None;
-        Ok(SessionThread {
-            sender,
-            receiver,
-            device,
-            images,
-            timestamp,
-        })
+    fn running(&self) -> bool {
+        self.running
+    }
+}
+
+/// A type for building XR sessions
+pub struct SessionBuilder<'a> {
+    sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
+}
+
+impl<'a> SessionBuilder<'a> {
+    pub(crate) fn new(sessions: &'a mut Vec<Box<dyn MainThreadSession>>) -> SessionBuilder {
+        SessionBuilder { sessions }
     }
 
     /// For devices which are happy to hand over thread management to webxr.
@@ -171,7 +197,7 @@ impl SessionBuilder {
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
         thread::spawn(
-            move || match factory().and_then(|device| self.new_thread(device)) {
+            move || match factory().and_then(|device| SessionThread::new(device)) {
                 Ok(mut thread) => {
                     let session = thread.new_session();
                     let _ = acks.send(Ok(session));
@@ -183,5 +209,18 @@ impl SessionBuilder {
             },
         );
         ackr.recv().unwrap_or(Err(Error::CommunicationError))
+    }
+
+    /// For devices that need to run on the main thread.
+    pub fn run_on_main_thread<D, F>(self, factory: F) -> Result<Session, Error>
+    where
+        F: 'static + FnOnce() -> Result<D, Error>,
+        D: Device,
+    {
+        let device = factory()?;
+        let mut session_thread = SessionThread::new(device)?;
+        let session = session_thread.new_session();
+        self.sessions.push(Box::new(session_thread));
+        Ok(session)
     }
 }
