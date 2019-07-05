@@ -19,7 +19,6 @@ use euclid::TypedRigidTransform3D;
 use gleam::gl::GLsync;
 
 /// A trait for discovering XR devices
-#[cfg_attr(feature = "ipc", typetag::serde)]
 pub trait Discovery: 'static {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
