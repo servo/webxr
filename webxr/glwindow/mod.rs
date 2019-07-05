@@ -44,6 +44,20 @@ pub struct GlWindowDiscovery {
     gl_version: GlRequest,
 }
 
+impl GlWindowDiscovery {
+    pub fn new(
+        gl: Rc<Gl>,
+        events_loop_factory: EventsLoopFactory,
+        gl_version: GlRequest,
+    ) -> GlWindowDiscovery {
+        GlWindowDiscovery {
+            gl,
+            events_loop_factory,
+            gl_version,
+        }
+    }
+}
+
 impl Discovery for GlWindowDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
         if self.supports_session(mode) {
