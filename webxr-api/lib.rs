@@ -21,6 +21,7 @@ pub use frame::Frame;
 
 pub use registry::MainThreadRegistry;
 pub use registry::Registry;
+pub use registry::{SessionRequestCallback, SessionSupportCallback};
 
 pub use session::FrameRequestCallback;
 pub use session::HighResTimeStamp;
