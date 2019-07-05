@@ -20,13 +20,13 @@ use gleam::gl::GLsync;
 
 /// A trait for discovering XR devices
 #[cfg_attr(feature = "ipc", typetag::serde)]
-pub trait Discovery: 'static + Send {
+pub trait Discovery: 'static {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
 }
 
 /// A trait for using an XR device
-pub trait Device {
+pub trait Device: 'static {
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor>;
 
