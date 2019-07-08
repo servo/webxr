@@ -10,6 +10,8 @@ use euclid::TypedRigidTransform3D;
 /// The per-frame data that is provided by the device.
 /// https://www.w3.org/TR/webxr/#xrframe
 // TODO: other fields?
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct Frame {
     /// The transform from the viewer to native coordinates
     pub transform: TypedRigidTransform3D<f32, Viewer, Native>,
