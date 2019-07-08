@@ -39,14 +39,14 @@ const NEAR: f32 = 0.1;
 const FAR: f32 = 100.0;
 
 pub struct GlWindowDiscovery {
-    gl: Rc<Gl>,
+    gl: Rc<dyn Gl>,
     events_loop_factory: EventsLoopFactory,
     gl_version: GlRequest,
 }
 
 impl GlWindowDiscovery {
     pub fn new(
-        gl: Rc<Gl>,
+        gl: Rc<dyn Gl>,
         events_loop_factory: EventsLoopFactory,
         gl_version: GlRequest,
     ) -> GlWindowDiscovery {
@@ -78,7 +78,7 @@ impl Discovery for GlWindowDiscovery {
 pub struct GlWindowDevice {
     size: PhysicalSize,
     gl_context: WindowedContext<PossiblyCurrent>,
-    gl: Rc<Gl>,
+    gl: Rc<dyn Gl>,
     // This will become used when we support keyboard bindings for the WebXR glwindow
     #[allow(dead_code)]
     events_loop: EventsLoop,
@@ -133,7 +133,7 @@ impl Device for GlWindowDevice {
 
 impl GlWindowDevice {
     fn new(
-        gl: Rc<Gl>,
+        gl: Rc<dyn Gl>,
         gl_version: glutin::GlRequest,
         events_loop: glutin::EventsLoop,
     ) -> Result<GlWindowDevice, Error> {
@@ -177,4 +177,4 @@ impl GlWindowDevice {
     }
 }
 
-pub type EventsLoopFactory = Box<Fn() -> Result<EventsLoop, EventsLoopClosed>>;
+pub type EventsLoopFactory = Box<dyn Fn() -> Result<EventsLoop, EventsLoopClosed>>;
