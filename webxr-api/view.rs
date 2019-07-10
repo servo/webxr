@@ -12,38 +12,38 @@ use serde::{Deserialize, Serialize};
 
 /// The coordinate space of the viewer
 /// https://immersive-web.github.io/webxr/#dom-xrreferencespacetype-viewer
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Viewer {}
 
 /// The coordinate space of the floor
 /// https://immersive-web.github.io/webxr/#dom-xrreferencespacetype-local-floor
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Floor {}
 
 /// The coordinate space of the left eye
 /// https://immersive-web.github.io/webxr/#dom-xreye-left
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum LeftEye {}
 
 /// The coordinate space of the right eye
 /// https://immersive-web.github.io/webxr/#dom-xreye-right
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum RightEye {}
 
 /// The native 3D coordinate space of the device
 /// This is not part of the webvr specification.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Native {}
 
 /// The 2D coordinate space of a device display
 /// This is not part of the webvr specification.
 // TODO: are we OK assuming that we can use the same coordinate system for all displays?
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Display {}
 
