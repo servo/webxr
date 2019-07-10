@@ -7,6 +7,7 @@
 mod device;
 mod error;
 mod frame;
+mod mock;
 mod registry;
 mod session;
 mod view;
@@ -18,6 +19,10 @@ pub use device::Discovery;
 pub use error::Error;
 
 pub use frame::Frame;
+
+pub use mock::MockDeviceInit;
+pub use mock::MockDeviceMsg;
+pub use mock::MockDiscovery;
 
 pub use registry::MainThreadRegistry;
 pub use registry::Registry;
