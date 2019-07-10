@@ -5,6 +5,9 @@
 use crate::Discovery;
 use crate::Error;
 use crate::MainThreadSession;
+use crate::MockDeviceInit;
+use crate::MockDeviceMsg;
+use crate::MockDiscovery;
 use crate::Receiver;
 use crate::Sender;
 use crate::Session;
@@ -23,6 +26,7 @@ pub struct Registry {
 pub struct MainThreadRegistry {
     discoveries: Vec<Box<dyn Discovery>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
+    mocks: Vec<Box<dyn MockDiscovery>>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
 }
@@ -35,6 +39,11 @@ pub trait SessionSupportCallback: 'static + Send {
 #[cfg_attr(feature = "ipc", typetag::serde)]
 pub trait SessionRequestCallback: 'static + Send {
     fn callback(&mut self, result: Result<Session, Error>);
+}
+
+#[cfg_attr(feature = "ipc", typetag::serde)]
+pub trait MockDeviceCallback: 'static + Send {
+    fn callback(&mut self, result: Result<Sender<MockDeviceMsg>, Error>);
 }
 
 impl Registry {
@@ -55,6 +64,16 @@ impl Registry {
             .sender
             .send(RegistryMsg::RequestSession(mode, Box::new(callback)));
     }
+
+    pub fn simulate_device_connection<C>(&mut self, init: MockDeviceInit, callback: C)
+    where
+        C: MockDeviceCallback,
+    {
+        let _ = self.sender.send(RegistryMsg::SimulateDeviceConnection(
+            init,
+            Box::new(callback),
+        ));
+    }
 }
 
 impl MainThreadRegistry {
@@ -62,9 +81,11 @@ impl MainThreadRegistry {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let sessions = Vec::new();
+        let mocks = Vec::new();
         Ok(MainThreadRegistry {
             discoveries,
             sessions,
+            mocks,
             sender,
             receiver,
         })
@@ -78,6 +99,10 @@ impl MainThreadRegistry {
 
     pub fn register<D: Discovery>(&mut self, discovery: D) {
         self.discoveries.push(Box::new(discovery));
+    }
+
+    pub fn register_mock<D: MockDiscovery>(&mut self, discovery: D) {
+        self.mocks.push(Box::new(discovery));
     }
 
     pub fn run_on_main_thread<S: MainThreadSession>(&mut self, session: S) {
@@ -101,23 +126,48 @@ impl MainThreadRegistry {
     fn handle_msg(&mut self, msg: RegistryMsg) {
         match msg {
             RegistryMsg::SupportsSession(mode, mut callback) => {
-                for discovery in &self.discoveries {
-                    if discovery.supports_session(mode) {
-                        return callback.callback(Ok(()));
-                    }
-                }
-                return callback.callback(Err(Error::NoMatchingDevice));
+                callback.callback(self.supports_session(mode));
             }
             RegistryMsg::RequestSession(mode, mut callback) => {
-                for discovery in &mut self.discoveries {
-                    let xr = SessionBuilder::new(&mut self.sessions);
-                    if let Ok(session) = discovery.request_session(mode, xr) {
-                        return callback.callback(Ok(session));
-                    }
-                }
-                return callback.callback(Err(Error::NoMatchingDevice));
+                callback.callback(self.request_session(mode));
+            }
+            RegistryMsg::SimulateDeviceConnection(init, mut callback) => {
+                callback.callback(self.simulate_device_connection(init));
             }
         }
+    }
+
+    fn supports_session(&mut self, mode: SessionMode) -> Result<(), Error> {
+        for discovery in &self.discoveries {
+            if discovery.supports_session(mode) {
+                return Ok(());
+            }
+        }
+        Err(Error::NoMatchingDevice)
+    }
+
+    fn request_session(&mut self, mode: SessionMode) -> Result<Session, Error> {
+        for discovery in &mut self.discoveries {
+            let xr = SessionBuilder::new(&mut self.sessions);
+            if let Ok(session) = discovery.request_session(mode, xr) {
+                return Ok(session);
+            }
+        }
+        Err(Error::NoMatchingDevice)
+    }
+
+    fn simulate_device_connection(
+        &mut self,
+        init: MockDeviceInit,
+    ) -> Result<Sender<MockDeviceMsg>, Error> {
+        for mock in &mut self.mocks {
+            let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
+            if let Ok(discovery) = mock.simulate_device_connection(init.clone(), receiver) {
+                self.discoveries.insert(0, discovery);
+                return Ok(sender);
+            }
+        }
+        Err(Error::NoMatchingDevice)
     }
 }
 
@@ -125,4 +175,5 @@ impl MainThreadRegistry {
 enum RegistryMsg {
     RequestSession(SessionMode, Box<dyn SessionRequestCallback>),
     SupportsSession(SessionMode, Box<dyn SessionSupportCallback>),
+    SimulateDeviceConnection(MockDeviceInit, Box<dyn MockDeviceCallback>),
 }
