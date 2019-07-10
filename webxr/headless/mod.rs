@@ -58,10 +58,7 @@ impl Discovery for HeadlessDiscovery {
         }
         let receiver = self.receiver.take().ok_or(Error::NoMatchingDevice)?;
         let viewer_origin = self.init.viewer_origin.clone();
-        let floor_transform = self
-            .init
-            .local_to_floor_level_transform
-            .pre_mul(&viewer_origin);
+        let floor_transform = self.init.floor_origin.inverse();
         let views = self.init.views.clone();
         xr.spawn(move || {
             Ok(HeadlessDevice {
