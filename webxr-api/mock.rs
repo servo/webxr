@@ -30,14 +30,14 @@ pub struct MockDeviceInit {
     pub local_to_floor_level_transform: TypedRigidTransform3D<f32, Viewer, Floor>,
     pub supports_immersive: bool,
     pub supports_unbounded: bool,
-    pub viewer_origin: TypedRigidTransform3D<f32, Native, Viewer>,
+    pub viewer_origin: TypedRigidTransform3D<f32, Viewer, Native>,
     pub views: Views,
 }
 
 #[derive(Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum MockDeviceMsg {
-    SetViewerOrigin(TypedRigidTransform3D<f32, Native, Viewer>),
+    SetViewerOrigin(TypedRigidTransform3D<f32, Viewer, Native>),
     SetViews(Views),
     Focus,
     Blur,
