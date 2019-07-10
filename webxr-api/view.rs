@@ -47,6 +47,11 @@ pub enum Native {}
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Display {}
 
+/// The coordinate space of an input device
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum Input {}
+
 /// For each eye, the transform from the viewer to that eye,
 /// and its projection onto its display.
 /// For stereo displays, we have a `View<LeftEye>` and a `View<RightEye>`.

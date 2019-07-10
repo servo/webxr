@@ -6,6 +6,7 @@ use crate::Device;
 use crate::Error;
 use crate::Floor;
 use crate::Frame;
+use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
@@ -53,11 +54,16 @@ pub struct Session {
     floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
     views: Views,
     sender: Sender<SessionMsg>,
+    initial_inputs: Vec<InputSource>,
 }
 
 impl Session {
     pub fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor> {
         self.floor_transform.clone()
+    }
+
+    pub fn initial_inputs(&self) -> &[InputSource] {
+        &self.initial_inputs
     }
 
     pub fn views(&self) -> Views {
@@ -117,10 +123,12 @@ impl<D: Device> SessionThread<D> {
         let floor_transform = self.device.floor_transform();
         let views = self.device.views();
         let sender = self.sender.clone();
+        let initial_inputs = self.device.initial_inputs();
         Session {
             floor_transform,
             views,
             sender,
+            initial_inputs,
         }
     }
 

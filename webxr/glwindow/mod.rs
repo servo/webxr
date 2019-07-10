@@ -26,6 +26,7 @@ use webxr_api::Discovery;
 use webxr_api::Error;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
@@ -99,7 +100,10 @@ impl Device for GlWindowDevice {
     fn wait_for_animation_frame(&mut self) -> Frame {
         let _ = self.gl_context.swap_buffers();
         let transform = TypedRigidTransform3D::identity();
-        Frame { transform }
+        Frame {
+            transform,
+            inputs: vec![],
+        }
     }
 
     fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>, sync: GLsync) {
@@ -128,6 +132,10 @@ impl Device for GlWindowDevice {
             gl::COLOR_BUFFER_BIT,
             gl::NEAREST,
         );
+    }
+
+    fn initial_inputs(&self) -> Vec<InputSource> {
+        vec![]
     }
 }
 

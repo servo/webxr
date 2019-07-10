@@ -7,6 +7,7 @@ use webxr_api::Discovery;
 use webxr_api::Error;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::InputSource;
 use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscovery;
@@ -89,10 +90,17 @@ impl Device for HeadlessDevice {
             self.handle_msg(msg);
         }
         let transform = self.viewer_origin;
-        Frame { transform }
+        Frame {
+            transform,
+            inputs: vec![],
+        }
     }
 
     fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, _: GLsync) {}
+
+    fn initial_inputs(&self) -> Vec<InputSource> {
+        vec![]
+    }
 }
 
 impl HeadlessDevice {
