@@ -24,7 +24,7 @@ use euclid::TypedRigidTransform3D;
 use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 
-pub struct HeadlessMockDiscovery(());
+pub struct HeadlessMockDiscovery;
 
 struct HeadlessDiscovery {
     init: MockDeviceInit,
