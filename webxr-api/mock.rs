@@ -27,7 +27,7 @@ pub trait MockDiscovery: 'static {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockDeviceInit {
-    pub local_to_floor_level_transform: TypedRigidTransform3D<f32, Viewer, Floor>,
+    pub floor_origin: TypedRigidTransform3D<f32, Floor, Native>,
     pub supports_immersive: bool,
     pub supports_unbounded: bool,
     pub viewer_origin: TypedRigidTransform3D<f32, Viewer, Native>,
