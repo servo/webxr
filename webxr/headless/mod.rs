@@ -33,7 +33,7 @@ struct HeadlessDiscovery {
 
 struct HeadlessDevice {
     floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
-    viewer_origin: TypedRigidTransform3D<f32, Native, Viewer>,
+    viewer_origin: TypedRigidTransform3D<f32, Viewer, Native>,
     views: Views,
     receiver: Receiver<MockDeviceMsg>,
 }
@@ -91,7 +91,7 @@ impl Device for HeadlessDevice {
         while let Ok(msg) = self.receiver.try_recv() {
             self.handle_msg(msg);
         }
-        let transform = self.viewer_origin.inverse();
+        let transform = self.viewer_origin;
         Frame { transform }
     }
 
