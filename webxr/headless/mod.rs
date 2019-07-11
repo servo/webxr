@@ -22,17 +22,25 @@ use webxr_api::Views;
 use euclid::Size2D;
 use euclid::TypedRigidTransform3D;
 
+use gleam::gl;
 use gleam::gl::GLsync;
 use gleam::gl::GLuint;
+use gleam::gl::Gl;
 
-pub struct HeadlessMockDiscovery;
+use std::rc::Rc;
+
+pub struct HeadlessMockDiscovery {
+    gl: Rc<dyn Gl>,
+}
 
 struct HeadlessDiscovery {
+    gl: Rc<dyn Gl>,
     init: MockDeviceInit,
     receiver: Option<Receiver<MockDeviceMsg>>,
 }
 
 struct HeadlessDevice {
+    gl: Rc<dyn Gl>,
     floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
     viewer_origin: TypedRigidTransform3D<f32, Viewer, Native>,
     views: Views,
@@ -46,6 +54,7 @@ impl MockDiscovery for HeadlessMockDiscovery {
         receiver: Receiver<MockDeviceMsg>,
     ) -> Result<Box<dyn Discovery>, Error> {
         Ok(Box::new(HeadlessDiscovery {
+            gl: self.gl.clone(),
             init,
             receiver: Some(receiver),
         }))
@@ -57,12 +66,14 @@ impl Discovery for HeadlessDiscovery {
         if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
+        let gl = self.gl.clone();
         let receiver = self.receiver.take().ok_or(Error::NoMatchingDevice)?;
         let viewer_origin = self.init.viewer_origin.clone();
         let floor_transform = self.init.floor_origin.inverse();
         let views = self.init.views.clone();
-        xr.spawn(move || {
+        xr.run_on_main_thread(move || {
             Ok(HeadlessDevice {
+                gl,
                 floor_transform,
                 viewer_origin,
                 views,
@@ -96,10 +107,18 @@ impl Device for HeadlessDevice {
         }
     }
 
-    fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, _: GLsync) {}
+    fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: GLsync) {
+        self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+    }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
         vec![]
+    }
+}
+
+impl HeadlessMockDiscovery {
+    pub fn new(gl: Rc<dyn Gl>) -> HeadlessMockDiscovery {
+        HeadlessMockDiscovery { gl }
     }
 }
 
