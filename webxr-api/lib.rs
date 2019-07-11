@@ -7,6 +7,7 @@
 mod device;
 mod error;
 mod frame;
+mod input;
 mod mock;
 mod registry;
 mod session;
@@ -19,6 +20,12 @@ pub use device::Discovery;
 pub use error::Error;
 
 pub use frame::Frame;
+
+pub use input::Handedness;
+pub use input::InputFrame;
+pub use input::InputId;
+pub use input::InputSource;
+pub use input::TargetRayMode;
 
 pub use mock::MockDeviceInit;
 pub use mock::MockDeviceMsg;
@@ -38,6 +45,7 @@ pub use session::SessionThread;
 
 pub use view::Display;
 pub use view::Floor;
+pub use view::Input;
 pub use view::LeftEye;
 pub use view::Native;
 pub use view::RightEye;

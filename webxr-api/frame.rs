@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
 
@@ -18,4 +19,7 @@ pub struct Frame {
     /// This is equivalent to the pose of the viewer in native coordinates.
     /// This is the inverse of the view matrix.
     pub transform: TypedRigidTransform3D<f32, Viewer, Native>,
+
+    /// Frame information for each connected input source
+    pub inputs: Vec<InputFrame>,
 }
