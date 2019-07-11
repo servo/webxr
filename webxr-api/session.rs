@@ -16,9 +16,13 @@ use crate::WebGLExternalImageApi;
 use euclid::TypedRigidTransform3D;
 
 use std::thread;
+use std::time::Duration;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
+
+// How long to wait for an rAF.
+static TIMEOUT: Duration = Duration::from_millis(5);
 
 /// https://www.w3.org/TR/webxr/#xrsessionmode-enum
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +48,7 @@ enum SessionMsg {
     UpdateWebGLExternalImageApi(Box<dyn WebGLExternalImageApi>),
     RequestAnimationFrame(Box<dyn FrameRequestCallback>),
     RenderAnimationFrame,
+    Quit,
 }
 
 /// An object that represents an XR session.
@@ -90,6 +95,10 @@ impl Session {
 
     pub fn render_animation_frame(&mut self) {
         let _ = self.sender.send(SessionMsg::RenderAnimationFrame);
+    }
+
+    pub fn end_session(&mut self) {
+        let _ = self.sender.send(SessionMsg::Quit);
     }
 }
 
@@ -157,6 +166,9 @@ impl<D: Device> SessionThread<D> {
                     }
                 }
             }
+            SessionMsg::Quit => {
+                self.running = false;
+            }
         }
     }
 }
@@ -171,10 +183,8 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
     fn run_one_frame(&mut self) {
         let timestamp = self.timestamp;
         while timestamp == self.timestamp && self.running {
-            if let Ok(msg) = self.receiver.recv() {
+            if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
                 self.handle_msg(msg);
-            } else {
-                self.running = false;
             }
         }
         while let Ok(msg) = self.receiver.try_recv() {
