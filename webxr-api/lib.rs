@@ -55,6 +55,9 @@ pub use view::Views;
 
 pub use webgl::WebGLExternalImageApi;
 
+use std::thread;
+use std::time::Duration;
+
 #[cfg(feature = "ipc")]
 pub use ipc_channel::ipc::IpcSender as Sender;
 
@@ -65,9 +68,31 @@ pub use ipc_channel::ipc::IpcReceiver as Receiver;
 pub use ipc_channel::ipc::channel;
 
 #[cfg(not(feature = "ipc"))]
-pub use std::sync::mpsc::{Receiver, Sender};
+pub use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 
 #[cfg(not(feature = "ipc"))]
 fn channel<T>() -> Result<(Sender<T>, Receiver<T>), ()> {
     Ok(std::sync::mpsc::channel())
+}
+
+#[cfg(not(feature = "ipc"))]
+pub fn recv_timeout<T>(receiver: &Receiver<T>, timeout: Duration) -> Result<T, RecvTimeoutError> {
+    receiver.recv_timeout(timeout)
+}
+
+#[cfg(feature = "ipc")]
+pub fn recv_timeout<T>(receiver: &Receiver<T>, timeout: Duration) -> Result<T, ipc_channel::Error>
+where
+    T: serde::Serialize + for<'a> serde::Deserialize<'a>,
+{
+    // Sigh, polling, sigh.
+    let mut delay = timeout / 1000;
+    while delay < timeout {
+        if let Ok(msg) = receiver.try_recv() {
+            return Ok(msg);
+        }
+        thread::sleep(delay);
+        delay = delay * 2;
+    }
+    receiver.try_recv()
 }
