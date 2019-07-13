@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use euclid::Angle;
 use euclid::Size2D;
+use euclid::Trig;
 use euclid::TypedRigidTransform3D;
 use euclid::TypedTransform3D;
 use euclid::TypedVector3D;
@@ -10,6 +12,7 @@ use euclid::TypedVector3D;
 use gleam::gl;
 use gleam::gl::GLsizei;
 use gleam::gl::GLsync;
+use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
 use glutin::dpi::PhysicalSize;
@@ -23,6 +26,7 @@ use std::rc::Rc;
 
 use webxr_api::Device;
 use webxr_api::Discovery;
+use webxr_api::Display;
 use webxr_api::Error;
 use webxr_api::Floor;
 use webxr_api::Frame;
@@ -39,23 +43,24 @@ const EYE_DISTANCE: f32 = 0.25;
 const NEAR: f32 = 0.1;
 const FAR: f32 = 100.0;
 
+pub trait GlWindow {
+    fn make_current(&mut self);
+    fn swap_buffers(&mut self);
+    fn size(&self) -> Size2D<GLsizei>;
+    fn new_window(&self) -> Result<Box<dyn GlWindow>, ()>;
+}
+
 pub struct GlWindowDiscovery {
     gl: Rc<dyn Gl>,
-    events_loop_factory: EventsLoopFactory,
-    gl_version: GlRequest,
+    factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
 }
 
 impl GlWindowDiscovery {
     pub fn new(
         gl: Rc<dyn Gl>,
-        events_loop_factory: EventsLoopFactory,
-        gl_version: GlRequest,
+        factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
     ) -> GlWindowDiscovery {
-        GlWindowDiscovery {
-            gl,
-            events_loop_factory,
-            gl_version,
-        }
+        GlWindowDiscovery { gl, factory }
     }
 }
 
@@ -63,9 +68,8 @@ impl Discovery for GlWindowDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
         if self.supports_session(mode) {
             let gl = self.gl.clone();
-            let gl_version = self.gl_version;
-            let events_loop = (self.events_loop_factory)().or(Err(Error::NoMatchingDevice))?;
-            xr.run_on_main_thread(move || GlWindowDevice::new(gl, gl_version, events_loop))
+            let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
+            xr.run_on_main_thread(move || GlWindowDevice::new(gl, window))
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -77,12 +81,9 @@ impl Discovery for GlWindowDiscovery {
 }
 
 pub struct GlWindowDevice {
-    size: PhysicalSize,
-    gl_context: WindowedContext<PossiblyCurrent>,
     gl: Rc<dyn Gl>,
-    // This will become used when we support keyboard bindings for the WebXR glwindow
-    #[allow(dead_code)]
-    events_loop: EventsLoop,
+    window: Box<dyn GlWindow>,
+    read_fbo: GLuint,
 }
 
 impl Device for GlWindowDevice {
@@ -98,8 +99,9 @@ impl Device for GlWindowDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
-        let _ = self.gl_context.swap_buffers();
-        let transform = TypedRigidTransform3D::identity();
+        self.window.swap_buffers();
+        let translation = TypedVector3D::new(0.0, 0.0, -5.0);
+        let transform = TypedRigidTransform3D::from_translation(translation);
         Frame {
             transform,
             inputs: vec![],
@@ -107,11 +109,21 @@ impl Device for GlWindowDevice {
     }
 
     fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>, sync: GLsync) {
+        self.window.make_current();
+
         let width = size.width as GLsizei;
         let height = size.height as GLsizei;
+        let inner_size = self.window.size();
+
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        self.gl
+            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
         self.gl.framebuffer_texture_2d(
             gl::READ_FRAMEBUFFER,
             gl::COLOR_ATTACHMENT0,
@@ -119,6 +131,8 @@ impl Device for GlWindowDevice {
             texture_id,
             0,
         );
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
         self.gl.viewport(0, 0, width, height);
         self.gl.blit_framebuffer(
             0,
@@ -127,11 +141,12 @@ impl Device for GlWindowDevice {
             height,
             0,
             0,
-            width,
-            height,
+            inner_size.width,
+            inner_size.height,
             gl::COLOR_BUFFER_BIT,
             gl::NEAREST,
         );
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -140,47 +155,48 @@ impl Device for GlWindowDevice {
 }
 
 impl GlWindowDevice {
-    fn new(
-        gl: Rc<dyn Gl>,
-        gl_version: glutin::GlRequest,
-        events_loop: glutin::EventsLoop,
-    ) -> Result<GlWindowDevice, Error> {
-        let window_builder = glutin::WindowBuilder::new()
-            .with_title("Test XR device")
-            .with_visibility(true)
-            .with_multitouch();
-        let gl_context = unsafe {
-            glutin::ContextBuilder::new()
-                .with_gl(gl_version)
-                .with_vsync(false) // Assume the browser vsync is the same as the test VR window vsync
-                .build_windowed(window_builder, &events_loop)
-                .or(Err(Error::NoMatchingDevice))?
-                .make_current()
-                .or(Err(Error::NoMatchingDevice))?
-        };
-        let logical_size = gl_context
-            .window()
-            .get_inner_size()
-            .ok_or(Error::NoMatchingDevice)?;
-        let hidpi = gl_context.window().get_hidpi_factor();
-        let size = logical_size.to_physical(hidpi);
+    fn new(gl: Rc<dyn Gl>, mut window: Box<GlWindow>) -> Result<GlWindowDevice, Error> {
+        window.make_current();
+        let read_fbo = gl.gen_framebuffers(1)[0];
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
         Ok(GlWindowDevice {
-            gl_context,
-            events_loop,
             gl,
-            size,
+            window,
+            read_fbo,
         })
     }
 
     fn view<Eye>(&self, offset: f32) -> View<Eye> {
-        let width = self.size.width as f32;
-        let height = self.size.height as f32;
-        let projection = TypedTransform3D::ortho(0.0, width, 0.0, height, NEAR, FAR);
+        let projection = self.perspective(NEAR, FAR);
         let translation = TypedVector3D::new(offset, 0.0, 0.0);
         let transform = TypedRigidTransform3D::from_translation(translation);
         View {
             transform,
             projection,
+        }
+    }
+
+    fn perspective<Eye>(&self, near: f32, far: f32) -> TypedTransform3D<f32, Eye, Display> {
+        // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
+        let size = self.window.size();
+        let width = size.width as f32;
+        let height = size.height as f32;
+        let fov_up = Angle::radians(f32::fast_atan2(2.0 * height, width));
+        let f = 1.0 / fov_up.radians.tan();
+        let nf = 1.0 / (near - far);
+        let aspect = (width / 2.0) / height;
+
+        // Dear rustfmt, This is a 4x4 matrix, please leave it alone. Best, ajeffrey.
+        {
+            #[rustfmt::skip]
+            // Sigh, row-major vs column-major
+            return TypedTransform3D::row_major(
+                f / aspect, 0.0, 0.0,                   0.0,
+                0.0,        f,   0.0,                   0.0,
+                0.0,        0.0, (far + near) * nf,     -1.0,
+                0.0,        0.0, 2.0 * far * near * nf, 0.0,
+            );
         }
     }
 }

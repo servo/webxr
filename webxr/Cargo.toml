@@ -28,3 +28,4 @@ webxr-api = { path = "../webxr-api" }
 euclid = "0.19"
 gleam = "0.6"
 glutin = { version = "0.21", optional = true }
+log = "0.4"
