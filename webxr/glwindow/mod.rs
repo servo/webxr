@@ -154,7 +154,7 @@ impl Device for GlWindowDevice {
 }
 
 impl GlWindowDevice {
-    fn new(gl: Rc<dyn Gl>, mut window: Box<GlWindow>) -> Result<GlWindowDevice, Error> {
+    fn new(gl: Rc<dyn Gl>, mut window: Box<dyn GlWindow>) -> Result<GlWindowDevice, Error> {
         window.make_current();
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);

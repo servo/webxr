@@ -10,10 +10,12 @@ use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
+use crate::Viewport;
 use crate::Views;
 use crate::WebGLExternalImageApi;
 
 use euclid::TypedRigidTransform3D;
+use euclid::TypedSize2D;
 
 use std::thread;
 use std::time::Duration;
@@ -58,6 +60,7 @@ enum SessionMsg {
 pub struct Session {
     floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
     views: Views,
+    resolution: TypedSize2D<i32, Viewport>,
     sender: Sender<SessionMsg>,
     initial_inputs: Vec<InputSource>,
 }
@@ -73,6 +76,10 @@ impl Session {
 
     pub fn views(&self) -> Views {
         self.views.clone()
+    }
+
+    pub fn recommended_framebuffer_resolution(&self) -> TypedSize2D<i32, Viewport> {
+        self.resolution
     }
 
     pub fn update_webgl_external_image_api<I>(&mut self, images: I)
@@ -131,11 +138,13 @@ impl<D: Device> SessionThread<D> {
     pub fn new_session(&mut self) -> Session {
         let floor_transform = self.device.floor_transform();
         let views = self.device.views();
+        let resolution = self.device.recommended_framebuffer_resolution();
         let sender = self.sender.clone();
         let initial_inputs = self.device.initial_inputs();
         Session {
             floor_transform,
             views,
+            resolution,
             sender,
             initial_inputs,
         }

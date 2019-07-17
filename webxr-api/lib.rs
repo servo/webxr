@@ -51,6 +51,7 @@ pub use view::Native;
 pub use view::RightEye;
 pub use view::View;
 pub use view::Viewer;
+pub use view::Viewport;
 pub use view::Views;
 
 pub use webgl::WebGLExternalImageApi;
