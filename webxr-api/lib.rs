@@ -55,7 +55,9 @@ pub use view::Views;
 
 pub use webgl::WebGLExternalImageApi;
 
+#[cfg(feature = "ipc")]
 use std::thread;
+
 use std::time::Duration;
 
 #[cfg(feature = "ipc")]

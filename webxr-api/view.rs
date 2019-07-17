@@ -4,6 +4,7 @@
 
 //! This crate uses `euclid`'s typed units, and exposes different coordinate spaces.
 
+use euclid::TypedRect;
 use euclid::TypedRigidTransform3D;
 use euclid::TypedTransform3D;
 
@@ -40,12 +41,19 @@ pub enum RightEye {}
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Native {}
 
-/// The 2D coordinate space of a device display
-/// This is not part of the webvr specification.
+/// The normalized device coordinate space, where the display
+/// is from (-1,-1) to (1,1).
 // TODO: are we OK assuming that we can use the same coordinate system for all displays?
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Display {}
+
+/// The unnormalized device coordinate space, where the display
+/// is from (0,0) to (w,h), measured in pixels.
+// TODO: are we OK assuming that we can use the same coordinate system for all displays?
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum Viewport {}
 
 /// The coordinate space of an input device
 #[derive(Clone, Copy, Debug)]
@@ -53,7 +61,7 @@ pub enum Display {}
 pub enum Input {}
 
 /// For each eye, the transform from the viewer to that eye,
-/// and its projection onto its display.
+/// its projection onto its display, and its display viewport.
 /// For stereo displays, we have a `View<LeftEye>` and a `View<RightEye>`.
 /// For mono displays, we hagve a `View<Viewer>` (where the transform is the identity).
 /// https://immersive-web.github.io/webxr/#xrview
@@ -62,6 +70,7 @@ pub enum Input {}
 pub struct View<Eye> {
     pub transform: TypedRigidTransform3D<f32, Viewer, Eye>,
     pub projection: TypedTransform3D<f32, Eye, Display>,
+    pub viewport: TypedRect<i32, Viewport>,
 }
 
 /// Whether a device is mono or stereo, and the views it supports.
