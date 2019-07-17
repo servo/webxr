@@ -5,7 +5,10 @@
 use euclid::Angle;
 use euclid::Size2D;
 use euclid::Trig;
+use euclid::TypedPoint2D;
+use euclid::TypedRect;
 use euclid::TypedRigidTransform3D;
+use euclid::TypedSize2D;
 use euclid::TypedTransform3D;
 use euclid::TypedVector3D;
 
@@ -15,12 +18,8 @@ use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
-use glutin::dpi::PhysicalSize;
 use glutin::EventsLoop;
 use glutin::EventsLoopClosed;
-use glutin::GlRequest;
-use glutin::PossiblyCurrent;
-use glutin::WindowedContext;
 
 use std::rc::Rc;
 
@@ -93,8 +92,8 @@ impl Device for GlWindowDevice {
     }
 
     fn views(&self) -> Views {
-        let left = self.view(-EYE_DISTANCE);
-        let right = self.view(EYE_DISTANCE);
+        let left = self.view(false);
+        let right = self.view(true);
         Views::Stereo(left, right)
     }
 
@@ -167,13 +166,24 @@ impl GlWindowDevice {
         })
     }
 
-    fn view<Eye>(&self, offset: f32) -> View<Eye> {
+    fn view<Eye>(&self, is_right: bool) -> View<Eye> {
+        let window_size = self.window.size();
+        let viewport_size = TypedSize2D::new(window_size.width / 2, window_size.height);
+        let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
+        let viewport_origin = TypedPoint2D::new(viewport_x_origin, 0);
+        let viewport = TypedRect::new(viewport_origin, viewport_size);
         let projection = self.perspective(NEAR, FAR);
-        let translation = TypedVector3D::new(offset, 0.0, 0.0);
+        let eye_distance = if is_right {
+            EYE_DISTANCE
+        } else {
+            -EYE_DISTANCE
+        };
+        let translation = TypedVector3D::new(eye_distance, 0.0, 0.0);
         let transform = TypedRigidTransform3D::from_translation(translation);
         View {
             transform,
             projection,
+            viewport,
         }
     }
 
