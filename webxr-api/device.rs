@@ -12,10 +12,12 @@ use crate::Native;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
+use crate::Viewport;
 use crate::Views;
 
 use euclid::Size2D;
 use euclid::TypedRigidTransform3D;
+use euclid::TypedSize2D;
 
 use gleam::gl::GLsync;
 
@@ -30,8 +32,18 @@ pub trait Device: 'static {
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor>;
 
-    /// The transforms from viewer coordinates to the eyes.
+    /// The transforms from viewer coordinates to the eyes, and their associated viewports.
     fn views(&self) -> Views;
+
+    /// A resolution large enough to contain all the viewports.
+    /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
+    fn recommended_framebuffer_resolution(&self) -> TypedSize2D<i32, Viewport> {
+        let viewport = match self.views() {
+            Views::Mono(view) => view.viewport,
+            Views::Stereo(left, right) => left.viewport.union(&right.viewport),
+        };
+        TypedSize2D::new(viewport.max_x(), viewport.max_y())
+    }
 
     /// This method should block waiting for the next frame,
     /// and return the information for it.
