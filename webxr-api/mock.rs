@@ -7,6 +7,7 @@ use crate::Error;
 use crate::Floor;
 use crate::Native;
 use crate::Receiver;
+use crate::Sender;
 use crate::Viewer;
 use crate::Views;
 
@@ -41,4 +42,5 @@ pub enum MockDeviceMsg {
     SetViews(Views),
     Focus,
     Blur,
+    Disconnect(Sender<()>),
 }

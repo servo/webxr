@@ -61,4 +61,10 @@ pub trait Device: 'static {
 
     /// Sets the event handling callback
     fn set_event_callback(&mut self, callback: Box<dyn EventCallback>);
+
+    /// Whether the device is still connected
+    fn connected(&mut self) -> bool;
+
+    /// Quit the session
+    fn quit(&mut self);
 }

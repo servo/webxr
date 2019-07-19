@@ -5,6 +5,7 @@
 use webxr_api::Device;
 use webxr_api::Discovery;
 use webxr_api::Error;
+use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::EventCallback;
 use webxr_api::Floor;
@@ -15,6 +16,7 @@ use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscovery;
 use webxr_api::Native;
 use webxr_api::Receiver;
+use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
@@ -48,6 +50,8 @@ struct HeadlessDevice {
     views: Views,
     receiver: Receiver<MockDeviceMsg>,
     events: EventBuffer,
+    disconnect_callbacks: Vec<Sender<()>>,
+    connected: bool,
 }
 
 impl MockDiscovery for HeadlessMockDiscovery {
@@ -82,6 +86,8 @@ impl Discovery for HeadlessDiscovery {
                 views,
                 receiver,
                 events: Default::default(),
+                disconnect_callbacks: vec![],
+                connected: true,
             })
         })
     }
@@ -122,6 +128,22 @@ impl Device for HeadlessDevice {
     fn set_event_callback(&mut self, callback: Box<dyn EventCallback>) {
         self.events.upgrade(callback)
     }
+
+    fn connected(&mut self) -> bool {
+        if self.connected {
+            true
+        } else {
+            for callback in self.disconnect_callbacks.drain(..) {
+                let _ = callback.send(());
+            }
+            false
+        }
+    }
+
+    fn quit(&mut self) {
+        self.connected = false;
+        self.events.callback(Event::SessionEnd);
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -144,6 +166,11 @@ impl HeadlessDevice {
             }
             MockDeviceMsg::Blur => {
                 // TODO
+            }
+            MockDeviceMsg::Disconnect(sender) => {
+                self.connected = false;
+                self.disconnect_callbacks.push(sender);
+                self.events.callback(Event::SessionEnd);
             }
         }
     }
