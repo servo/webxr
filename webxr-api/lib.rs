@@ -35,6 +35,8 @@ pub use input::TargetRayMode;
 pub use mock::MockDeviceInit;
 pub use mock::MockDeviceMsg;
 pub use mock::MockDiscovery;
+pub use mock::MockInputInit;
+pub use mock::MockInputMsg;
 
 pub use registry::MainThreadRegistry;
 pub use registry::Registry;

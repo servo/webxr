@@ -10,10 +10,13 @@ use webxr_api::EventBuffer;
 use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::Input;
+use webxr_api::InputFrame;
 use webxr_api::InputSource;
 use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscovery;
+use webxr_api::MockInputMsg;
 use webxr_api::Native;
 use webxr_api::Receiver;
 use webxr_api::Sender;
@@ -43,6 +46,12 @@ struct HeadlessDiscovery {
     receiver: Option<Receiver<MockDeviceMsg>>,
 }
 
+struct InputInfo {
+    source: InputSource,
+    active: bool,
+    pointer: RigidTransform3D<f32, Input, Native>,
+}
+
 struct HeadlessDevice {
     gl: Rc<dyn Gl>,
     floor_transform: RigidTransform3D<f32, Native, Floor>,
@@ -50,6 +59,7 @@ struct HeadlessDevice {
     views: Views,
     receiver: Receiver<MockDeviceMsg>,
     events: EventBuffer,
+    inputs: Vec<InputInfo>,
     disconnect_callbacks: Vec<Sender<()>>,
     connected: bool,
 }
@@ -88,6 +98,7 @@ impl Discovery for HeadlessDiscovery {
                 events: Default::default(),
                 disconnect_callbacks: vec![],
                 connected: true,
+                inputs: vec![],
             })
         })
     }
@@ -111,10 +122,16 @@ impl Device for HeadlessDevice {
             self.handle_msg(msg);
         }
         let transform = self.viewer_origin;
-        Frame {
-            transform,
-            inputs: vec![],
-        }
+        let inputs = self
+            .inputs
+            .iter()
+            .filter(|i| i.active)
+            .map(|i| InputFrame {
+                id: i.source.id,
+                target_ray_origin: i.pointer,
+            })
+            .collect();
+        Frame { transform, inputs }
     }
 
     fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: GLsync) {
@@ -166,6 +183,25 @@ impl HeadlessDevice {
             }
             MockDeviceMsg::Blur => {
                 // TODO
+            }
+            MockDeviceMsg::AddInputSource(init) => {
+                self.inputs.push(InputInfo {
+                    source: init.source,
+                    pointer: init.pointer_origin,
+                    active: true,
+                });
+                self.events.callback(Event::AddInput(init.source))
+            }
+            MockDeviceMsg::MessageInputSource(id, msg) => {
+                if let Some(ref mut input) = self.inputs.iter_mut().find(|i| i.source.id == id) {
+                    match msg {
+                        MockInputMsg::SetHandedness(h) => input.source.handedness = h,
+                        MockInputMsg::SetTargetRayMode(t) => input.source.target_ray_mode = t,
+                        MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
+                        MockInputMsg::Disconnect => input.active = false,
+                        MockInputMsg::Reconnect => input.active = true,
+                    }
+                }
             }
             MockDeviceMsg::Disconnect(sender) => {
                 self.connected = false;
