@@ -6,6 +6,7 @@
 
 mod device;
 mod error;
+mod events;
 mod frame;
 mod input;
 mod mock;
@@ -18,6 +19,10 @@ pub use device::Device;
 pub use device::Discovery;
 
 pub use error::Error;
+
+pub use events::Event;
+pub use events::EventBuffer;
+pub use events::EventCallback;
 
 pub use frame::Frame;
 

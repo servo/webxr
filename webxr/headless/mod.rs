@@ -5,6 +5,8 @@
 use webxr_api::Device;
 use webxr_api::Discovery;
 use webxr_api::Error;
+use webxr_api::EventBuffer;
+use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
@@ -45,6 +47,7 @@ struct HeadlessDevice {
     viewer_origin: RigidTransform3D<f32, Viewer, Native>,
     views: Views,
     receiver: Receiver<MockDeviceMsg>,
+    events: EventBuffer,
 }
 
 impl MockDiscovery for HeadlessMockDiscovery {
@@ -78,6 +81,7 @@ impl Discovery for HeadlessDiscovery {
                 viewer_origin,
                 views,
                 receiver,
+                events: Default::default(),
             })
         })
     }
@@ -113,6 +117,10 @@ impl Device for HeadlessDevice {
 
     fn initial_inputs(&self) -> Vec<InputSource> {
         vec![]
+    }
+
+    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>) {
+        self.events.upgrade(callback)
     }
 }
 

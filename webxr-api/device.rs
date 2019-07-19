@@ -5,6 +5,7 @@
 //! Traits to be implemented by backends
 
 use crate::Error;
+use crate::EventCallback;
 use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
@@ -57,4 +58,7 @@ pub trait Device: 'static {
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism
     fn initial_inputs(&self) -> Vec<InputSource>;
+
+    /// Sets the event handling callback
+    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>);
 }

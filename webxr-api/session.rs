@@ -4,6 +4,7 @@
 
 use crate::Device;
 use crate::Error;
+use crate::EventCallback;
 use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
@@ -49,6 +50,7 @@ pub trait FrameRequestCallback: 'static + Send {
 enum SessionMsg {
     UpdateWebGLExternalImageApi(Box<dyn WebGLExternalImageApi>),
     RequestAnimationFrame(Box<dyn FrameRequestCallback>),
+    SetEventCallback(Box<dyn EventCallback>),
     RenderAnimationFrame,
     Quit,
 }
@@ -98,6 +100,15 @@ impl Session {
         let _ = self
             .sender
             .send(SessionMsg::RequestAnimationFrame(Box::new(callback)));
+    }
+
+    pub fn set_event_callback<C>(&mut self, callback: C)
+    where
+        C: EventCallback,
+    {
+        let _ = self
+            .sender
+            .send(SessionMsg::SetEventCallback(Box::new(callback)));
     }
 
     pub fn render_animation_frame(&mut self) {
@@ -165,6 +176,9 @@ impl<D: Device> SessionThread<D> {
                 let timestamp = self.timestamp;
                 let frame = self.device.wait_for_animation_frame();
                 callback.callback(timestamp, frame);
+            }
+            SessionMsg::SetEventCallback(callback) => {
+                self.device.set_event_callback(callback);
             }
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
