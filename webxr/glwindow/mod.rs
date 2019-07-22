@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use euclid::default::Size2D as UntypedSize2D;
 use euclid::Angle;
-use euclid::Point2D;
-use euclid::Rect;
-use euclid::RigidTransform3D;
 use euclid::Size2D;
-use euclid::Transform3D;
 use euclid::Trig;
-use euclid::Vector3D;
+use euclid::TypedPoint2D;
+use euclid::TypedRect;
+use euclid::TypedRigidTransform3D;
+use euclid::TypedSize2D;
+use euclid::TypedTransform3D;
+use euclid::TypedVector3D;
 
 use gleam::gl;
 use gleam::gl::GLsizei;
@@ -48,7 +48,7 @@ const FAR: f32 = 100.0;
 pub trait GlWindow {
     fn make_current(&mut self);
     fn swap_buffers(&mut self);
-    fn size(&self) -> UntypedSize2D<GLsizei>;
+    fn size(&self) -> Size2D<GLsizei>;
     fn new_window(&self) -> Result<Box<dyn GlWindow>, ()>;
 }
 
@@ -91,9 +91,9 @@ pub struct GlWindowDevice {
 }
 
 impl Device for GlWindowDevice {
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
-        let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
-        RigidTransform3D::from_translation(translation)
+    fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor> {
+        let translation = TypedVector3D::new(-HEIGHT, 0.0, 0.0);
+        TypedRigidTransform3D::from_translation(translation)
     }
 
     fn views(&self) -> Views {
@@ -104,15 +104,15 @@ impl Device for GlWindowDevice {
 
     fn wait_for_animation_frame(&mut self) -> Frame {
         self.window.swap_buffers();
-        let translation = Vector3D::new(0.0, 0.0, -5.0);
-        let transform = RigidTransform3D::from_translation(translation);
+        let translation = TypedVector3D::new(0.0, 0.0, -5.0);
+        let transform = TypedRigidTransform3D::from_translation(translation);
         Frame {
             transform,
             inputs: vec![],
         }
     }
 
-    fn render_animation_frame(&mut self, texture_id: u32, size: UntypedSize2D<i32>, sync: GLsync) {
+    fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>, sync: GLsync) {
         self.window.make_current();
 
         let width = size.width as GLsizei;
@@ -190,18 +190,18 @@ impl GlWindowDevice {
 
     fn view<Eye>(&self, is_right: bool) -> View<Eye> {
         let window_size = self.window.size();
-        let viewport_size = Size2D::new(window_size.width / 2, window_size.height);
+        let viewport_size = TypedSize2D::new(window_size.width / 2, window_size.height);
         let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
-        let viewport_origin = Point2D::new(viewport_x_origin, 0);
-        let viewport = Rect::new(viewport_origin, viewport_size);
+        let viewport_origin = TypedPoint2D::new(viewport_x_origin, 0);
+        let viewport = TypedRect::new(viewport_origin, viewport_size);
         let projection = self.perspective(NEAR, FAR);
         let eye_distance = if is_right {
             EYE_DISTANCE
         } else {
             -EYE_DISTANCE
         };
-        let translation = Vector3D::new(eye_distance, 0.0, 0.0);
-        let transform = RigidTransform3D::from_translation(translation);
+        let translation = TypedVector3D::new(eye_distance, 0.0, 0.0);
+        let transform = TypedRigidTransform3D::from_translation(translation);
         View {
             transform,
             projection,
@@ -209,7 +209,7 @@ impl GlWindowDevice {
         }
     }
 
-    fn perspective<Eye>(&self, near: f32, far: f32) -> Transform3D<f32, Eye, Display> {
+    fn perspective<Eye>(&self, near: f32, far: f32) -> TypedTransform3D<f32, Eye, Display> {
         // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
         let size = self.window.size();
         let width = size.width as f32;
@@ -223,7 +223,7 @@ impl GlWindowDevice {
         {
             #[rustfmt::skip]
             // Sigh, row-major vs column-major
-            return Transform3D::row_major(
+            return TypedTransform3D::row_major(
                 f / aspect, 0.0, 0.0,                   0.0,
                 0.0,        f,   0.0,                   0.0,
                 0.0,        0.0, (far + near) * nf,     -1.0,
