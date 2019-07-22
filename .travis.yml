@@ -9,8 +9,9 @@ before_script:
 
 script:
   - cargo fmt --all -- --check
-  - cd webxr; cargo build --features=glwindow,headless
-  - cd webxr; cargo build --features=ipc,glwindow,headless
+  - cd webxr
+  - cargo build --features=glwindow,headless
+  - cargo build --features=ipc,glwindow,headless
 
 notifications:
   webhooks: http://build.servo.org:54856/travis
