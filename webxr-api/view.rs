@@ -4,9 +4,9 @@
 
 //! This crate uses `euclid`'s typed units, and exposes different coordinate spaces.
 
-use euclid::Rect;
-use euclid::RigidTransform3D;
-use euclid::Transform3D;
+use euclid::TypedRect;
+use euclid::TypedRigidTransform3D;
+use euclid::TypedTransform3D;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -68,9 +68,9 @@ pub enum Input {}
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct View<Eye> {
-    pub transform: RigidTransform3D<f32, Viewer, Eye>,
-    pub projection: Transform3D<f32, Eye, Display>,
-    pub viewport: Rect<i32, Viewport>,
+    pub transform: TypedRigidTransform3D<f32, Viewer, Eye>,
+    pub projection: TypedTransform3D<f32, Eye, Display>,
+    pub viewport: TypedRect<i32, Viewport>,
 }
 
 /// Whether a device is mono or stereo, and the views it supports.
