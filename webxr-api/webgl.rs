@@ -5,7 +5,7 @@
 //! The WebGL functionality needed by WebXR.
 
 use crate::Error;
-use euclid::Size2D;
+use euclid::default::Size2D;
 use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 
