@@ -19,8 +19,8 @@ use webxr_api::SessionMode;
 use webxr_api::Viewer;
 use webxr_api::Views;
 
-use euclid::Size2D;
-use euclid::TypedRigidTransform3D;
+use euclid::default::Size2D;
+use euclid::RigidTransform3D;
 
 use gleam::gl;
 use gleam::gl::GLsync;
@@ -41,8 +41,8 @@ struct HeadlessDiscovery {
 
 struct HeadlessDevice {
     gl: Rc<dyn Gl>,
-    floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
-    viewer_origin: TypedRigidTransform3D<f32, Viewer, Native>,
+    floor_transform: RigidTransform3D<f32, Native, Floor>,
+    viewer_origin: RigidTransform3D<f32, Viewer, Native>,
     views: Views,
     receiver: Receiver<MockDeviceMsg>,
 }
@@ -88,7 +88,7 @@ impl Discovery for HeadlessDiscovery {
 }
 
 impl Device for HeadlessDevice {
-    fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         self.floor_transform.clone()
     }
 

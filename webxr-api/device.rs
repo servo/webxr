@@ -15,9 +15,9 @@ use crate::SessionMode;
 use crate::Viewport;
 use crate::Views;
 
+use euclid::default::Size2D as UntypedSize2D;
+use euclid::RigidTransform3D;
 use euclid::Size2D;
-use euclid::TypedRigidTransform3D;
-use euclid::TypedSize2D;
 
 use gleam::gl::GLsync;
 
@@ -30,19 +30,19 @@ pub trait Discovery: 'static {
 /// A trait for using an XR device
 pub trait Device: 'static {
     /// The transform from native coordinates to the floor.
-    fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor>;
+    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor>;
 
     /// The transforms from viewer coordinates to the eyes, and their associated viewports.
     fn views(&self) -> Views;
 
     /// A resolution large enough to contain all the viewports.
     /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
-    fn recommended_framebuffer_resolution(&self) -> TypedSize2D<i32, Viewport> {
+    fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
         let viewport = match self.views() {
             Views::Mono(view) => view.viewport,
             Views::Stereo(left, right) => left.viewport.union(&right.viewport),
         };
-        TypedSize2D::new(viewport.max_x(), viewport.max_y())
+        Size2D::new(viewport.max_x(), viewport.max_y())
     }
 
     /// This method should block waiting for the next frame,
@@ -52,7 +52,7 @@ pub trait Device: 'static {
     /// This method should render a GL texture to the device.
     /// While this method is being called, the device has unique access
     /// to the texture. The texture should be sync'd using glWaitSync before being used.
-    fn render_animation_frame(&mut self, texture_id: u32, size: Size2D<i32>, sync: GLsync);
+    fn render_animation_frame(&mut self, texture_id: u32, size: UntypedSize2D<i32>, sync: GLsync);
 
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism
