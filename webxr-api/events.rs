@@ -10,6 +10,19 @@ pub enum Event {
     RemoveInput(InputId),
     /// Session ended by device
     SessionEnd,
+    /// Session focused/blurred/etc
+    VisibilityChange(Visibility),
+}
+
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum Visibility {
+    /// Session fully displayed to user
+    Visible,
+    /// Session still visible, but is not the primary focus
+    VisibleBlurred,
+    /// Session not visible
+    Hidden,
 }
 
 #[cfg_attr(feature = "ipc", typetag::serde)]

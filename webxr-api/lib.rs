@@ -23,6 +23,7 @@ pub use error::Error;
 pub use events::Event;
 pub use events::EventBuffer;
 pub use events::EventCallback;
+pub use events::Visibility;
 
 pub use frame::Frame;
 

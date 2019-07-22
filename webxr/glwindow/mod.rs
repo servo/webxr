@@ -166,8 +166,10 @@ impl Device for GlWindowDevice {
     }
 
     fn quit(&mut self) {
-        self.connected = false;
-        self.events.callback(Event::SessionEnd);
+        if !self.connected {
+            self.connected = false;
+            self.events.callback(Event::SessionEnd);
+        }
     }
 }
 
