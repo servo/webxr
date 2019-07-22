@@ -5,8 +5,14 @@
 use crate::Discovery;
 use crate::Error;
 use crate::Floor;
+use crate::Handedness;
+use crate::Input;
+use crate::InputId;
+use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
+use crate::Sender;
+use crate::TargetRayMode;
 use crate::Viewer;
 use crate::Views;
 
@@ -39,6 +45,26 @@ pub struct MockDeviceInit {
 pub enum MockDeviceMsg {
     SetViewerOrigin(RigidTransform3D<f32, Viewer, Native>),
     SetViews(Views),
+    AddInputSource(MockInputInit),
+    MessageInputSource(InputId, MockInputMsg),
     Focus,
     Blur,
+    Disconnect(Sender<()>),
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct MockInputInit {
+    pub source: InputSource,
+    pub pointer_origin: RigidTransform3D<f32, Input, Native>,
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum MockInputMsg {
+    SetHandedness(Handedness),
+    SetTargetRayMode(TargetRayMode),
+    SetPointerOrigin(RigidTransform3D<f32, Input, Native>),
+    Disconnect,
+    Reconnect,
 }

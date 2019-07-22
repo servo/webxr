@@ -27,6 +27,9 @@ use webxr_api::Device;
 use webxr_api::Discovery;
 use webxr_api::Display;
 use webxr_api::Error;
+use webxr_api::Event;
+use webxr_api::EventBuffer;
+use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
@@ -83,6 +86,8 @@ pub struct GlWindowDevice {
     gl: Rc<dyn Gl>,
     window: Box<dyn GlWindow>,
     read_fbo: GLuint,
+    events: EventBuffer,
+    connected: bool,
 }
 
 impl Device for GlWindowDevice {
@@ -151,6 +156,21 @@ impl Device for GlWindowDevice {
     fn initial_inputs(&self) -> Vec<InputSource> {
         vec![]
     }
+
+    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>) {
+        self.events.upgrade(callback)
+    }
+
+    fn connected(&mut self) -> bool {
+        self.connected
+    }
+
+    fn quit(&mut self) {
+        if !self.connected {
+            self.connected = false;
+            self.events.callback(Event::SessionEnd);
+        }
+    }
 }
 
 impl GlWindowDevice {
@@ -163,6 +183,8 @@ impl GlWindowDevice {
             gl,
             window,
             read_fbo,
+            events: Default::default(),
+            connected: true,
         })
     }
 

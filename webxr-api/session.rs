@@ -4,6 +4,7 @@
 
 use crate::Device;
 use crate::Error;
+use crate::EventCallback;
 use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
@@ -49,6 +50,7 @@ pub trait FrameRequestCallback: 'static + Send {
 enum SessionMsg {
     UpdateWebGLExternalImageApi(Box<dyn WebGLExternalImageApi>),
     RequestAnimationFrame(Box<dyn FrameRequestCallback>),
+    SetEventCallback(Box<dyn EventCallback>),
     RenderAnimationFrame,
     Quit,
 }
@@ -100,6 +102,15 @@ impl Session {
             .send(SessionMsg::RequestAnimationFrame(Box::new(callback)));
     }
 
+    pub fn set_event_callback<C>(&mut self, callback: C)
+    where
+        C: EventCallback,
+    {
+        let _ = self
+            .sender
+            .send(SessionMsg::SetEventCallback(Box::new(callback)));
+    }
+
     pub fn render_animation_frame(&mut self) {
         let _ = self.sender.send(SessionMsg::RenderAnimationFrame);
     }
@@ -122,6 +133,7 @@ pub struct SessionThread<D> {
 impl<D: Device> SessionThread<D> {
     pub fn new(device: D) -> Result<SessionThread<D>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
+
         let timestamp = 0.0;
         let images = None;
         let running = true;
@@ -152,11 +164,16 @@ impl<D: Device> SessionThread<D> {
 
     pub fn run(&mut self) {
         while let Ok(msg) = self.receiver.recv() {
-            self.handle_msg(msg);
+            if !self.handle_msg(msg) {
+                break;
+            }
         }
     }
 
-    fn handle_msg(&mut self, msg: SessionMsg) {
+    fn handle_msg(&mut self, msg: SessionMsg) -> bool {
+        if !self.device.connected() {
+            return false;
+        }
         match msg {
             SessionMsg::UpdateWebGLExternalImageApi(images) => {
                 self.images = Some(images);
@@ -165,6 +182,9 @@ impl<D: Device> SessionThread<D> {
                 let timestamp = self.timestamp;
                 let frame = self.device.wait_for_animation_frame();
                 callback.callback(timestamp, frame);
+            }
+            SessionMsg::SetEventCallback(callback) => {
+                self.device.set_event_callback(callback);
             }
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
@@ -177,8 +197,11 @@ impl<D: Device> SessionThread<D> {
             }
             SessionMsg::Quit => {
                 self.running = false;
+                self.device.quit();
+                return false;
             }
-        }
+        };
+        true
     }
 }
 
@@ -193,11 +216,15 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
         let timestamp = self.timestamp;
         while timestamp == self.timestamp && self.running {
             if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
-                self.handle_msg(msg);
+                if !self.handle_msg(msg) {
+                    break;
+                }
             }
         }
         while let Ok(msg) = self.receiver.try_recv() {
-            self.handle_msg(msg);
+            if !self.handle_msg(msg) {
+                break;
+            }
         }
     }
 
