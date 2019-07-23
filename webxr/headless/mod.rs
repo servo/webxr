@@ -17,7 +17,9 @@ use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscovery;
 use webxr_api::MockInputMsg;
 use webxr_api::Native;
+use webxr_api::Quitter;
 use webxr_api::Receiver;
+use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
@@ -63,6 +65,8 @@ struct HeadlessDeviceData {
     views: Views,
     inputs: Vec<InputInfo>,
     events: EventBuffer,
+    quitter: Option<Quitter>,
+    disconnected: bool,
 }
 
 impl MockDiscovery for HeadlessMockDiscovery {
@@ -80,6 +84,8 @@ impl MockDiscovery for HeadlessMockDiscovery {
             views,
             inputs: vec![],
             events: Default::default(),
+            quitter: None,
+            disconnected: false,
         };
         let data = Arc::new(Mutex::new(data));
         let data_ = data.clone();
@@ -97,13 +103,15 @@ impl MockDiscovery for HeadlessMockDiscovery {
 
 fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceData>>) {
     while let Ok(msg) = receiver.recv() {
-        data.lock().expect("Mutex poisoned").handle_msg(msg);
+        if !data.lock().expect("Mutex poisoned").handle_msg(msg) {
+            break;
+        }
     }
 }
 
 impl Discovery for HeadlessDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
-        if !self.supports_session(mode) {
+        if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
         let gl = self.gl.clone();
@@ -152,12 +160,12 @@ impl Device for HeadlessDevice {
         self.data.lock().unwrap().events.upgrade(dest)
     }
 
-    fn connected(&mut self) -> bool {
-        true
+    fn quit(&mut self) {
+        self.data.lock().unwrap().events.callback(Event::SessionEnd);
     }
 
-    fn quit(&mut self) {
-        // XXXManishearth
+    fn set_quitter(&mut self, quitter: Quitter) {
+        self.data.lock().unwrap().quitter = Some(quitter);
     }
 }
 
@@ -168,7 +176,7 @@ impl HeadlessMockDiscovery {
 }
 
 impl HeadlessDeviceData {
-    fn handle_msg(&mut self, msg: MockDeviceMsg) {
+    fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
@@ -201,9 +209,14 @@ impl HeadlessDeviceData {
                     }
                 }
             }
-            MockDeviceMsg::Disconnect(_) => {
-                // XXXManishearth
+            MockDeviceMsg::Disconnect(s) => {
+                self.disconnected = true;
+                self.quitter.as_ref().map(|q| q.quit());
+                // notify the client that we're done disconnecting
+                let _ = s.send(());
+                return false;
             }
         }
+        true
     }
 }

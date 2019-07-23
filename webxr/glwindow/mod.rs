@@ -33,6 +33,7 @@ use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
 use webxr_api::Native;
+use webxr_api::Quitter;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
@@ -87,7 +88,6 @@ pub struct GlWindowDevice {
     window: Box<dyn GlWindow>,
     read_fbo: GLuint,
     events: EventBuffer,
-    connected: bool,
 }
 
 impl Device for GlWindowDevice {
@@ -161,15 +161,14 @@ impl Device for GlWindowDevice {
         self.events.upgrade(dest)
     }
 
-    fn connected(&mut self) -> bool {
-        self.connected
+    fn quit(&mut self) {
+        self.events.callback(Event::SessionEnd);
     }
 
-    fn quit(&mut self) {
-        if !self.connected {
-            self.connected = false;
-            self.events.callback(Event::SessionEnd);
-        }
+    fn set_quitter(&mut self, _: Quitter) {
+        // Glwindow currently doesn't have any way to end its own session
+        // XXXManishearth add something for this that listens for the window
+        // being closed
     }
 }
 
@@ -184,7 +183,6 @@ impl GlWindowDevice {
             window,
             read_fbo,
             events: Default::default(),
-            connected: true,
         })
     }
 
