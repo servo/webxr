@@ -13,6 +13,7 @@ use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
+use crate::WebGLExternalImageApi;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,7 @@ pub struct MainThreadRegistry {
     discoveries: Vec<Box<dyn Discovery>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
     mocks: Vec<Box<dyn MockDiscovery>>,
+    webgl: Option<Box<dyn WebGLExternalImageApi>>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
@@ -78,50 +80,25 @@ impl MainThreadWakerImpl {
     }
 }
 
-#[cfg_attr(feature = "ipc", typetag::serde)]
-pub trait SessionSupportCallback: 'static + Send {
-    fn callback(&mut self, result: Result<(), Error>);
-}
-
-#[cfg_attr(feature = "ipc", typetag::serde)]
-pub trait SessionRequestCallback: 'static + Send {
-    fn callback(&mut self, result: Result<Session, Error>);
-}
-
-#[cfg_attr(feature = "ipc", typetag::serde)]
-pub trait MockDeviceCallback: 'static + Send {
-    fn callback(&mut self, result: Result<Sender<MockDeviceMsg>, Error>);
-}
-
 impl Registry {
-    pub fn supports_session<C>(&mut self, mode: SessionMode, callback: C)
-    where
-        C: SessionSupportCallback,
-    {
-        let _ = self
-            .sender
-            .send(RegistryMsg::SupportsSession(mode, Box::new(callback)));
+    pub fn supports_session(&mut self, mode: SessionMode, dest: Sender<Result<(), Error>>) {
+        let _ = self.sender.send(RegistryMsg::SupportsSession(mode, dest));
         self.waker.wake();
     }
 
-    pub fn request_session<C>(&mut self, mode: SessionMode, callback: C)
-    where
-        C: SessionRequestCallback,
-    {
-        let _ = self
-            .sender
-            .send(RegistryMsg::RequestSession(mode, Box::new(callback)));
+    pub fn request_session(&mut self, mode: SessionMode, dest: Sender<Result<Session, Error>>) {
+        let _ = self.sender.send(RegistryMsg::RequestSession(mode, dest));
         self.waker.wake();
     }
 
-    pub fn simulate_device_connection<C>(&mut self, init: MockDeviceInit, callback: C)
-    where
-        C: MockDeviceCallback,
-    {
-        let _ = self.sender.send(RegistryMsg::SimulateDeviceConnection(
-            init,
-            Box::new(callback),
-        ));
+    pub fn simulate_device_connection(
+        &mut self,
+        init: MockDeviceInit,
+        dest: Sender<Result<Sender<MockDeviceMsg>, Error>>,
+    ) {
+        let _ = self
+            .sender
+            .send(RegistryMsg::SimulateDeviceConnection(init, dest));
         self.waker.wake();
     }
 }
@@ -133,10 +110,12 @@ impl MainThreadRegistry {
         let sessions = Vec::new();
         let mocks = Vec::new();
         let waker = MainThreadWakerImpl::new(waker)?;
+        let webgl = None;
         Ok(MainThreadRegistry {
             discoveries,
             sessions,
             mocks,
+            webgl,
             sender,
             receiver,
             waker,
@@ -148,6 +127,10 @@ impl MainThreadRegistry {
             sender: self.sender.clone(),
             waker: self.waker.clone(),
         }
+    }
+
+    pub fn set_webgl(&mut self, webgl: Box<dyn WebGLExternalImageApi>) {
+        self.webgl = Some(webgl);
     }
 
     pub fn register<D: Discovery>(&mut self, discovery: D) {
@@ -178,14 +161,14 @@ impl MainThreadRegistry {
 
     fn handle_msg(&mut self, msg: RegistryMsg) {
         match msg {
-            RegistryMsg::SupportsSession(mode, mut callback) => {
-                callback.callback(self.supports_session(mode));
+            RegistryMsg::SupportsSession(mode, dest) => {
+                let _ = dest.send(self.supports_session(mode));
             }
-            RegistryMsg::RequestSession(mode, mut callback) => {
-                callback.callback(self.request_session(mode));
+            RegistryMsg::RequestSession(mode, dest) => {
+                let _ = dest.send(self.request_session(mode));
             }
-            RegistryMsg::SimulateDeviceConnection(init, mut callback) => {
-                callback.callback(self.simulate_device_connection(init));
+            RegistryMsg::SimulateDeviceConnection(init, dest) => {
+                let _ = dest.send(self.simulate_device_connection(init));
             }
         }
     }
@@ -200,8 +183,9 @@ impl MainThreadRegistry {
     }
 
     fn request_session(&mut self, mode: SessionMode) -> Result<Session, Error> {
+        let webgl = self.webgl.as_ref().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
-            let xr = SessionBuilder::new(&mut self.sessions);
+            let xr = SessionBuilder::new(&**webgl, &mut self.sessions);
             if let Ok(session) = discovery.request_session(mode, xr) {
                 return Ok(session);
             }
@@ -226,7 +210,7 @@ impl MainThreadRegistry {
 
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum RegistryMsg {
-    RequestSession(SessionMode, Box<dyn SessionRequestCallback>),
-    SupportsSession(SessionMode, Box<dyn SessionSupportCallback>),
-    SimulateDeviceConnection(MockDeviceInit, Box<dyn MockDeviceCallback>),
+    RequestSession(SessionMode, Sender<Result<Session, Error>>),
+    SupportsSession(SessionMode, Sender<Result<(), Error>>),
+    SimulateDeviceConnection(MockDeviceInit, Sender<Result<Sender<MockDeviceMsg>, Error>>),
 }
