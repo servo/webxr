@@ -15,8 +15,8 @@ use crate::Viewport;
 use crate::Views;
 use crate::WebGLExternalImageApi;
 
-use euclid::TypedRigidTransform3D;
-use euclid::TypedSize2D;
+use euclid::RigidTransform3D;
+use euclid::Size2D;
 
 use std::thread;
 use std::time::Duration;
@@ -60,15 +60,15 @@ enum SessionMsg {
 /// https://www.w3.org/TR/webxr/#xrsession-interface
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Session {
-    floor_transform: TypedRigidTransform3D<f32, Native, Floor>,
+    floor_transform: RigidTransform3D<f32, Native, Floor>,
     views: Views,
-    resolution: TypedSize2D<i32, Viewport>,
+    resolution: Size2D<i32, Viewport>,
     sender: Sender<SessionMsg>,
     initial_inputs: Vec<InputSource>,
 }
 
 impl Session {
-    pub fn floor_transform(&self) -> TypedRigidTransform3D<f32, Native, Floor> {
+    pub fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         self.floor_transform.clone()
     }
 
@@ -80,7 +80,7 @@ impl Session {
         self.views.clone()
     }
 
-    pub fn recommended_framebuffer_resolution(&self) -> TypedSize2D<i32, Viewport> {
+    pub fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
         self.resolution
     }
 
