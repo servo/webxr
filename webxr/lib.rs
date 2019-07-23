@@ -9,3 +9,11 @@ pub mod glwindow;
 
 #[cfg(feature = "headless")]
 pub mod headless;
+
+#[cfg(feature = "googlevr")]
+pub mod googlevr;
+
+#[cfg(feature = "googlevr")]
+mod gl {
+    include!(concat!(env!("OUT_DIR"), "/gles_bindings.rs"));
+}

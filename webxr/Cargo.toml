@@ -22,6 +22,8 @@ path = "lib.rs"
 glwindow = ["glutin"]
 headless = []
 ipc = ["webxr-api/ipc"]
+googlevr = ["gvr-sys"]
+
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }
@@ -29,3 +31,7 @@ euclid = "0.20"
 gleam = "0.6"
 glutin = { version = "0.21", optional = true }
 log = "0.4"
+gvr-sys = { version = "0.7", optional = true }
+
+[build-dependencies]
+gl_generator = "0.11"
