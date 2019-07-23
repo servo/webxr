@@ -5,7 +5,7 @@
 use crate::Input;
 use crate::Native;
 
-use euclid::TypedRigidTransform3D;
+use euclid::RigidTransform3D;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
@@ -39,5 +39,5 @@ pub struct InputSource {
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputFrame {
     pub id: InputId,
-    pub target_ray_origin: TypedRigidTransform3D<f32, Input, Native>,
+    pub target_ray_origin: RigidTransform3D<f32, Input, Native>,
 }
