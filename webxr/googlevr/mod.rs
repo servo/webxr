@@ -23,7 +23,7 @@ use webxr_api::Views;
 use euclid::default::Size2D;
 use euclid::RigidTransform3D;
 
-pub struct GoogleVRDiscovery {}
+pub struct GoogleVRDiscovery { }
 
 impl GoogleVRDiscovery {
     pub fn new() -> Self {
@@ -89,3 +89,4 @@ impl Device for GoogleVRDevice {
         // do nothing for now until we need the quitter
     }
 }
+

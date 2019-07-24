@@ -17,3 +17,6 @@ pub mod googlevr;
 mod gl {
     include!(concat!(env!("OUT_DIR"), "/gles_bindings.rs"));
 }
+
+#[cfg(all(feature = "googlevr", target_os = "android"))]
+pub(crate) mod jni_utils;
