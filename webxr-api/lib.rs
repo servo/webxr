@@ -40,6 +40,7 @@ pub use mock::MockInputInit;
 pub use mock::MockInputMsg;
 
 pub use registry::MainThreadRegistry;
+pub use registry::MainThreadWaker;
 pub use registry::Registry;
 pub use registry::{MockDeviceCallback, SessionRequestCallback, SessionSupportCallback};
 

@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Registry {
     sender: Sender<RegistryMsg>,
+    waker: MainThreadWakerImpl,
 }
 
 pub struct MainThreadRegistry {
@@ -29,6 +30,52 @@ pub struct MainThreadRegistry {
     mocks: Vec<Box<dyn MockDiscovery>>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
+    waker: MainThreadWakerImpl,
+}
+
+pub trait MainThreadWaker: 'static + Send {
+    fn clone_box(&self) -> Box<dyn MainThreadWaker>;
+    fn wake(&self);
+}
+
+impl Clone for Box<dyn MainThreadWaker> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+#[derive(Clone)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+struct MainThreadWakerImpl {
+    #[cfg(feature = "ipc")]
+    sender: Sender<()>,
+    #[cfg(not(feature = "ipc"))]
+    waker: Box<dyn MainThreadWaker>,
+}
+
+#[cfg(feature = "ipc")]
+impl MainThreadWakerImpl {
+    fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadWakerImpl, Error> {
+        let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
+        ipc_channel::router::ROUTER
+            .add_route(receiver.to_opaque(), Box::new(move |_| waker.wake()));
+        Ok(MainThreadWakerImpl { sender })
+    }
+
+    fn wake(&self) {
+        let _ = self.sender.send(());
+    }
+}
+
+#[cfg(not(feature = "ipc"))]
+impl MainThreadWakerImpl {
+    fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadWakerImpl, Error> {
+        Ok(MainThreadWakerImpl { waker })
+    }
+
+    pub fn wake(&self) {
+        self.waker.wake()
+    }
 }
 
 #[cfg_attr(feature = "ipc", typetag::serde)]
@@ -54,6 +101,7 @@ impl Registry {
         let _ = self
             .sender
             .send(RegistryMsg::SupportsSession(mode, Box::new(callback)));
+        self.waker.wake();
     }
 
     pub fn request_session<C>(&mut self, mode: SessionMode, callback: C)
@@ -63,6 +111,7 @@ impl Registry {
         let _ = self
             .sender
             .send(RegistryMsg::RequestSession(mode, Box::new(callback)));
+        self.waker.wake();
     }
 
     pub fn simulate_device_connection<C>(&mut self, init: MockDeviceInit, callback: C)
@@ -73,27 +122,31 @@ impl Registry {
             init,
             Box::new(callback),
         ));
+        self.waker.wake();
     }
 }
 
 impl MainThreadRegistry {
-    pub fn new() -> Result<MainThreadRegistry, Error> {
+    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadRegistry, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let sessions = Vec::new();
         let mocks = Vec::new();
+        let waker = MainThreadWakerImpl::new(waker)?;
         Ok(MainThreadRegistry {
             discoveries,
             sessions,
             mocks,
             sender,
             receiver,
+            waker,
         })
     }
 
     pub fn registry(&self) -> Registry {
         Registry {
             sender: self.sender.clone(),
+            waker: self.waker.clone(),
         }
     }
 
