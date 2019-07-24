@@ -6,3 +6,10 @@ pub use discovery::GoogleVRDiscovery;
 
 pub(crate) mod device;
 pub(crate) mod discovery;
+
+// Export functions called from Java
+#[cfg(target_os = "android")]
+pub mod jni {
+    pub use super::discovery::Java_com_rust_webvr_GVRService_nativeOnPause;
+    pub use super::discovery::Java_com_rust_webvr_GVRService_nativeOnResume;
+}

@@ -4,11 +4,11 @@ use webxr_api::Device;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
-use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
 use webxr_api::Native;
+use webxr_api::Sender;
 use webxr_api::Quitter;
 use webxr_api::Views;
 
@@ -48,7 +48,7 @@ impl Device for GoogleVRDevice {
         vec![]
     }
 
-    fn set_event_callback(&mut self, _callback: Box<dyn EventCallback>) {
+    fn set_event_dest(&mut self, _dest: Sender<Event>) {
         unimplemented!()
     }
 
