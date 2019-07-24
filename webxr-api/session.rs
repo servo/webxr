@@ -163,17 +163,16 @@ impl<D: Device> SessionThread<D> {
     }
 
     pub fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv() {
-            if !self.handle_msg(msg) {
+        while self.running {
+            if let Ok(msg) = self.receiver.recv() {
+                self.handle_msg(msg);
+            } else {
                 break;
             }
         }
     }
 
-    fn handle_msg(&mut self, msg: SessionMsg) -> bool {
-        if !self.device.connected() {
-            return false;
-        }
+    fn handle_msg(&mut self, msg: SessionMsg) {
         match msg {
             SessionMsg::UpdateWebGLExternalImageApi(images) => {
                 self.images = Some(images);
@@ -198,10 +197,9 @@ impl<D: Device> SessionThread<D> {
             SessionMsg::Quit => {
                 self.running = false;
                 self.device.quit();
-                return false;
             }
-        };
-        true
+        }
+        self.running = self.running && self.device.connected();
     }
 }
 
@@ -216,13 +214,8 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
         let timestamp = self.timestamp;
         while timestamp == self.timestamp && self.running {
             if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
-                if !self.handle_msg(msg) {
-                    break;
-                }
-            }
-        }
-        while let Ok(msg) = self.receiver.try_recv() {
-            if !self.handle_msg(msg) {
+                self.handle_msg(msg);
+            } else {
                 break;
             }
         }
