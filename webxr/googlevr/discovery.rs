@@ -62,14 +62,15 @@ impl GoogleVRDiscovery {
 impl Discovery for GoogleVRDiscovery {
     #[cfg(target_os = "android")]
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
-        let (ctx, controller_ctx, java_class);
+        let (ctx, controller_ctx, java_class, java_object);
         unsafe {
             ctx = SendPtr::new(self.ctx);
             controller_ctx = SendPtr::new(self.controller_ctx);
             java_class = SendPtr::new(self.java_class);
+            java_object = SendPtr::new(self.java_object);
         }
         if self.supports_session(mode) {
-            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, java_class))
+            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, java_class, java_object))
         } else {
             Err(Error::NoMatchingDevice)
         }

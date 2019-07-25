@@ -27,6 +27,8 @@ use super::discovery::SendPtr;
 
 #[cfg(target_os = "android")]
 use android_injected_glue::ffi as ndk;
+#[cfg(target_os = "android")]
+use crate::jni_utils::JNIScope;
 
 pub(crate) struct GoogleVRDevice {
     events: EventBuffer,
@@ -36,6 +38,8 @@ pub(crate) struct GoogleVRDevice {
 
     #[cfg(target_os = "android")]
     java_class: ndk::jclass,
+    #[cfg(target_os = "android")]
+    java_object: ndk::jobject,
     ctx: *mut gvr::gvr_context,
     controller_ctx: *mut gvr::gvr_controller_context,
     viewport_list: *mut gvr::gvr_buffer_viewport_list,
@@ -45,6 +49,7 @@ pub(crate) struct GoogleVRDevice {
     swap_chain: *mut gvr::gvr_swap_chain,
     frame: *mut gvr::gvr_frame,
     fbo_id: u32,
+    presenting: bool,
 }
 
 impl GoogleVRDevice {
@@ -53,6 +58,7 @@ impl GoogleVRDevice {
         ctx: SendPtr<*mut gvr::gvr_context>,
         controller_ctx: SendPtr<*mut gvr::gvr_controller_context>,
         java_class: SendPtr<ndk::jclass>,
+        java_object: SendPtr<ndk::jobject>,
     ) -> Result<Self, Error> {
         let mut device = GoogleVRDevice {
             events: Default::default(),
@@ -63,6 +69,7 @@ impl GoogleVRDevice {
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
             java_class: java_class.get(),
+            java_object: java_object.get(),
             viewport_list: ptr::null_mut(),
             left_eye_vp: ptr::null_mut(),
             right_eye_vp: ptr::null_mut(),
@@ -73,11 +80,14 @@ impl GoogleVRDevice {
             swap_chain: ptr::null_mut(),
             frame: ptr::null_mut(),
             fbo_id: 0,
+            presenting: false,
         };
         unsafe {
             device.init();
-            device.initialize_gl();
         }
+        // XXXManishearth figure out how to block until presentation
+        // starts
+        device.start_present();
         Ok(device)
     }
 
@@ -104,11 +114,14 @@ impl GoogleVRDevice {
             swap_chain: ptr::null_mut(),
             frame: ptr::null_mut(),
             fbo_id: 0,
+            presenting: false,
         };
         unsafe {
             device.init();
-            device.initialize_gl();
         }
+        // XXXManishearth figure out how to block until presentation
+        // starts
+        device.start_present();
         Ok(device)
     }
 
@@ -207,6 +220,66 @@ impl GoogleVRDevice {
             height: (7 * render_target_size.height) / 10,
         }
     }
+
+
+    #[cfg(target_os = "android")]
+    fn start_present(&mut self) {
+        if self.presenting {
+            return;
+        }
+        self.presenting = true;
+        unsafe {
+            if let Ok(jni_scope) = JNIScope::attach() {
+                let jni = jni_scope.jni();
+                let env = jni_scope.env;
+                let method = jni_scope.get_method(self.java_class, "startPresent", "()V", false);
+                (jni.CallVoidMethod)(env, self.java_object, method);
+            }
+        }
+
+        if self.swap_chain.is_null() {
+            unsafe {
+                self.initialize_gl();
+                debug_assert!(!self.swap_chain.is_null());
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn start_present(&mut self) {
+        if self.presenting {
+            return;
+        }
+        self.presenting = true;
+        if self.swap_chain.is_null() {
+            unsafe {
+                self.initialize_gl();
+                debug_assert!(!self.swap_chain.is_null());
+            }
+        }
+    }
+
+    // Hint to indicate that we are going to stop sending frames to the device
+    #[cfg(target_os = "android")]
+    fn stop_present(&mut self) {
+        if !self.presenting {
+            return;
+        }
+        self.presenting = false;
+        unsafe {
+            if let Ok(jni_scope) = JNIScope::attach() {
+                let jni = jni_scope.jni();
+                let env = jni_scope.env;
+                let method = jni_scope.get_method(self.java_class, "stopPresent", "()V", false);
+                (jni.CallVoidMethod)(env, self.java_object, method);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn stop_present(&mut self) {
+        self.presenting = false;
+    }
 }
 
 impl Device for GoogleVRDevice {
@@ -235,6 +308,7 @@ impl Device for GoogleVRDevice {
     }
 
     fn quit(&mut self) {
+        self.stop_present();
         self.events.callback(Event::SessionEnd);
     }
 
