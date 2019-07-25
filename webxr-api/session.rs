@@ -4,7 +4,7 @@
 
 use crate::Device;
 use crate::Error;
-use crate::EventCallback;
+use crate::Event;
 use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
@@ -13,6 +13,7 @@ use crate::Receiver;
 use crate::Sender;
 use crate::Viewport;
 use crate::Views;
+use crate::WebGLContextId;
 use crate::WebGLExternalImageApi;
 
 use euclid::RigidTransform3D;
@@ -39,18 +40,12 @@ pub enum SessionMode {
 /// https://www.w3.org/TR/hr-time/#dom-domhighrestimestamp
 pub type HighResTimeStamp = f64;
 
-/// https://www.w3.org/TR/webxr/#callbackdef-xrframerequestcallback
-#[cfg_attr(feature = "ipc", typetag::serde)]
-pub trait FrameRequestCallback: 'static + Send {
-    fn callback(&mut self, time: HighResTimeStamp, frame: Frame);
-}
-
 // The messages that are sent from the content thread to the session thread.
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
-    UpdateWebGLExternalImageApi(Box<dyn WebGLExternalImageApi>),
-    RequestAnimationFrame(Box<dyn FrameRequestCallback>),
-    SetEventCallback(Box<dyn EventCallback>),
+    SetWebGLContext(Option<WebGLContextId>),
+    SetEventDest(Sender<Event>),
+    RequestAnimationFrame(Sender<(HighResTimeStamp, Frame)>),
     RenderAnimationFrame,
     Quit,
 }
@@ -84,31 +79,16 @@ impl Session {
         self.resolution
     }
 
-    pub fn update_webgl_external_image_api<I>(&mut self, images: I)
-    where
-        I: WebGLExternalImageApi,
-    {
-        let _ = self
-            .sender
-            .send(SessionMsg::UpdateWebGLExternalImageApi(Box::new(images)));
+    pub fn set_webgl_context(&mut self, id: Option<WebGLContextId>) {
+        let _ = self.sender.send(SessionMsg::SetWebGLContext(id));
     }
 
-    pub fn request_animation_frame<C>(&mut self, callback: C)
-    where
-        C: FrameRequestCallback,
-    {
-        let _ = self
-            .sender
-            .send(SessionMsg::RequestAnimationFrame(Box::new(callback)));
+    pub fn request_animation_frame(&mut self, dest: Sender<(HighResTimeStamp, Frame)>) {
+        let _ = self.sender.send(SessionMsg::RequestAnimationFrame(dest));
     }
 
-    pub fn set_event_callback<C>(&mut self, callback: C)
-    where
-        C: EventCallback,
-    {
-        let _ = self
-            .sender
-            .send(SessionMsg::SetEventCallback(Box::new(callback)));
+    pub fn set_event_dest(&mut self, dest: Sender<Event>) {
+        let _ = self.sender.send(SessionMsg::SetEventDest(dest));
     }
 
     pub fn render_animation_frame(&mut self) {
@@ -124,24 +104,29 @@ impl Session {
 pub struct SessionThread<D> {
     receiver: Receiver<SessionMsg>,
     sender: Sender<SessionMsg>,
-    images: Option<Box<dyn WebGLExternalImageApi>>,
+    webgl: Box<dyn WebGLExternalImageApi>,
+    webgl_context: Option<WebGLContextId>,
     timestamp: HighResTimeStamp,
     running: bool,
     device: D,
 }
 
 impl<D: Device> SessionThread<D> {
-    pub fn new(device: D) -> Result<SessionThread<D>, Error> {
+    pub fn new(
+        device: D,
+        webgl: Box<dyn WebGLExternalImageApi>,
+    ) -> Result<SessionThread<D>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
 
         let timestamp = 0.0;
-        let images = None;
+        let webgl_context = None;
         let running = true;
         Ok(SessionThread {
             sender,
             receiver,
             device,
-            images,
+            webgl,
+            webgl_context,
             timestamp,
             running,
         })
@@ -174,24 +159,23 @@ impl<D: Device> SessionThread<D> {
 
     fn handle_msg(&mut self, msg: SessionMsg) {
         match msg {
-            SessionMsg::UpdateWebGLExternalImageApi(images) => {
-                self.images = Some(images);
+            SessionMsg::SetWebGLContext(id) => {
+                self.webgl_context = id;
             }
-            SessionMsg::RequestAnimationFrame(mut callback) => {
+            SessionMsg::SetEventDest(dest) => {
+                self.device.set_event_dest(dest);
+            }
+            SessionMsg::RequestAnimationFrame(dest) => {
                 let timestamp = self.timestamp;
                 let frame = self.device.wait_for_animation_frame();
-                callback.callback(timestamp, frame);
-            }
-            SessionMsg::SetEventCallback(callback) => {
-                self.device.set_event_callback(callback);
+                let _ = dest.send((timestamp, frame));
             }
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
-                if let Some(ref images) = self.images {
-                    if let Ok((texture_id, size, sync)) = images.lock() {
-                        self.device.render_animation_frame(texture_id, size, sync);
-                        images.unlock();
-                    }
+                if let Some(id) = self.webgl_context {
+                    let (texture_id, size, sync) = self.webgl.lock(id);
+                    self.device.render_animation_frame(texture_id, size, sync);
+                    self.webgl.unlock(id);
                 }
             }
             SessionMsg::Quit => {
@@ -228,12 +212,16 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
 
 /// A type for building XR sessions
 pub struct SessionBuilder<'a> {
+    webgl: &'a dyn WebGLExternalImageApi,
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
 }
 
 impl<'a> SessionBuilder<'a> {
-    pub(crate) fn new(sessions: &'a mut Vec<Box<dyn MainThreadSession>>) -> SessionBuilder {
-        SessionBuilder { sessions }
+    pub(crate) fn new(
+        webgl: &'a dyn WebGLExternalImageApi,
+        sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
+    ) -> SessionBuilder<'a> {
+        SessionBuilder { webgl, sessions }
     }
 
     /// For devices which are happy to hand over thread management to webxr.
@@ -243,8 +231,9 @@ impl<'a> SessionBuilder<'a> {
         D: Device,
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
-        thread::spawn(
-            move || match factory().and_then(|device| SessionThread::new(device)) {
+        let webgl = self.webgl.clone_box();
+        thread::spawn(move || {
+            match factory().and_then(|device| SessionThread::new(device, webgl)) {
                 Ok(mut thread) => {
                     let session = thread.new_session();
                     let _ = acks.send(Ok(session));
@@ -253,8 +242,8 @@ impl<'a> SessionBuilder<'a> {
                 Err(err) => {
                     let _ = acks.send(Err(err));
                 }
-            },
-        );
+            }
+        });
         ackr.recv().unwrap_or(Err(Error::CommunicationError))
     }
 
@@ -265,7 +254,8 @@ impl<'a> SessionBuilder<'a> {
         D: Device,
     {
         let device = factory()?;
-        let mut session_thread = SessionThread::new(device)?;
+        let webgl = self.webgl.clone_box();
+        let mut session_thread = SessionThread::new(device, webgl)?;
         let session = session_thread.new_session();
         self.sessions.push(Box::new(session_thread));
         Ok(session)

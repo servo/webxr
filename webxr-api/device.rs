@@ -5,11 +5,12 @@
 //! Traits to be implemented by backends
 
 use crate::Error;
-use crate::EventCallback;
+use crate::Event;
 use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
 use crate::Native;
+use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
@@ -59,8 +60,8 @@ pub trait Device: 'static {
     /// should be communicated through a yet-undecided event mechanism
     fn initial_inputs(&self) -> Vec<InputSource>;
 
-    /// Sets the event handling callback
-    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>);
+    /// Sets the event handling channel
+    fn set_event_dest(&mut self, dest: Sender<Event>);
 
     /// Whether the device is still connected
     fn connected(&mut self) -> bool;

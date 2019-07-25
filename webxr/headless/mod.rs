@@ -7,7 +7,6 @@ use webxr_api::Discovery;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
-use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::Input;
@@ -142,8 +141,8 @@ impl Device for HeadlessDevice {
         vec![]
     }
 
-    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>) {
-        self.events.upgrade(callback)
+    fn set_event_dest(&mut self, dest: Sender<Event>) {
+        self.events.upgrade(dest)
     }
 
     fn connected(&mut self) -> bool {

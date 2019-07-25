@@ -22,7 +22,6 @@ pub use error::Error;
 
 pub use events::Event;
 pub use events::EventBuffer;
-pub use events::EventCallback;
 pub use events::Visibility;
 
 pub use frame::Frame;
@@ -42,9 +41,7 @@ pub use mock::MockInputMsg;
 pub use registry::MainThreadRegistry;
 pub use registry::MainThreadWaker;
 pub use registry::Registry;
-pub use registry::{MockDeviceCallback, SessionRequestCallback, SessionSupportCallback};
 
-pub use session::FrameRequestCallback;
 pub use session::HighResTimeStamp;
 pub use session::MainThreadSession;
 pub use session::Session;
@@ -63,6 +60,7 @@ pub use view::Viewer;
 pub use view::Viewport;
 pub use view::Views;
 
+pub use webgl::WebGLContextId;
 pub use webgl::WebGLExternalImageApi;
 
 #[cfg(feature = "ipc")]

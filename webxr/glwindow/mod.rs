@@ -29,11 +29,11 @@ use webxr_api::Display;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
-use webxr_api::EventCallback;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
 use webxr_api::Native;
+use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
@@ -157,8 +157,8 @@ impl Device for GlWindowDevice {
         vec![]
     }
 
-    fn set_event_callback(&mut self, callback: Box<dyn EventCallback>) {
-        self.events.upgrade(callback)
+    fn set_event_dest(&mut self, dest: Sender<Event>) {
+        self.events.upgrade(dest)
     }
 
     fn connected(&mut self) -> bool {
