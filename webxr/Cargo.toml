@@ -30,7 +30,7 @@ webxr-api = { path = "../webxr-api" }
 euclid = "0.20"
 gleam = "0.6"
 glutin = { version = "0.21", optional = true }
-log = "0.4"
+log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]

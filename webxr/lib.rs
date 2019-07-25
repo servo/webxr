@@ -4,6 +4,9 @@
 
 //! This crate defines the Rust implementation of WebXR for various devices.
 
+#[macro_use]
+extern crate log;
+
 #[cfg(feature = "glwindow")]
 pub mod glwindow;
 
