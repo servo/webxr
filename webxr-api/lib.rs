@@ -62,6 +62,7 @@ pub use view::Views;
 
 pub use webgl::WebGLContextId;
 pub use webgl::WebGLExternalImageApi;
+pub use webgl::WebGLTextureId;
 
 #[cfg(feature = "ipc")]
 use std::thread;
