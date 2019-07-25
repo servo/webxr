@@ -16,13 +16,29 @@ use std::ptr;
 #[cfg(target_os = "android")]
 const SERVICE_CLASS_NAME: &'static str = "com/rust/webvr/GVRService";
 
+/// Quick way to make Sendable pointers
+#[derive(Copy, Clone)]
+pub(crate) struct SendPtr<T>(T);
+
+unsafe impl<T> Send for SendPtr<T> {}
+
+impl<T> SendPtr<*mut T> {
+    pub unsafe fn new(ptr: *mut T) -> Self {
+        SendPtr(ptr)
+    }
+
+    pub fn get(self) -> *mut T {
+        self.0
+    }
+}
+
 pub struct GoogleVRDiscovery {
     ctx: *mut gvr::gvr_context,
     controller_ctx: *mut gvr::gvr_controller_context,
     #[cfg(target_os = "android")]
-    pub java_object: ndk::jobject,
+    java_object: ndk::jobject,
     #[cfg(target_os = "android")]
-    pub java_class: ndk::jclass,
+    java_class: ndk::jclass,
 }
 
 impl GoogleVRDiscovery {
@@ -44,9 +60,30 @@ impl GoogleVRDiscovery {
 }
 
 impl Discovery for GoogleVRDiscovery {
+    #[cfg(target_os = "android")]
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+        let (ctx, controller_ctx, java_class);
+        unsafe {
+            ctx = SendPtr::new(self.ctx);
+            controller_ctx = SendPtr::new(self.controller_ctx);
+            java_class = SendPtr::new(self.java_class);
+        }
         if self.supports_session(mode) {
-            xr.spawn(move || GoogleVRDevice::new())
+            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, java_class))
+        } else {
+            Err(Error::NoMatchingDevice)
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+        let (ctx, controller_ctx);
+        unsafe {
+            ctx = SendPtr::new(self.ctx);
+            controller_ctx = SendPtr::new(self.controller_ctx);
+        }
+        if self.supports_session(mode) {
+            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx))
         } else {
             Err(Error::NoMatchingDevice)
         }
