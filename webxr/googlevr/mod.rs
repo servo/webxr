@@ -6,6 +6,7 @@ pub use discovery::GoogleVRDiscovery;
 
 pub(crate) mod device;
 pub(crate) mod discovery;
+pub(crate) mod input;
 
 // Export functions called from Java
 #[cfg(target_os = "android")]

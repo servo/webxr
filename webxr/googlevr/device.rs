@@ -6,12 +6,15 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::InputFrame;
+use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::RightEye;
 use webxr_api::Sender;
+use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
@@ -33,6 +36,7 @@ use gvr_sys::gvr_feature::*;
 use std::{mem, ptr};
 
 use super::discovery::SendPtr;
+use super::input::GoogleVRController;
 
 #[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
@@ -53,6 +57,7 @@ pub(crate) struct GoogleVRDevice {
     right_view: View<RightEye>,
     near: f32,
     far: f32,
+    input: Option<GoogleVRController>,
 
     #[cfg(target_os = "android")]
     java_class: ndk::jclass,
@@ -99,6 +104,7 @@ impl GoogleVRDevice {
             // https://github.com/servo/webxr/issues/32
             near: 0.1,
             far: 1000.0,
+            input: None,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -144,6 +150,7 @@ impl GoogleVRDevice {
             // https://github.com/servo/webxr/issues/32
             near: 0.1,
             far: 1000.0,
+            input: None,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -196,6 +203,10 @@ impl GoogleVRDevice {
             gvr::gvr_eye::GVR_RIGHT_EYE as usize,
             self.right_eye_vp,
         );
+
+        if let Ok(input) = GoogleVRController::new(self.ctx, self.controller_ctx) {
+            self.input = Some(input);
+        }
     }
 
     unsafe fn initialize_gl(&mut self) {
@@ -510,6 +521,17 @@ impl GoogleVRDevice {
             );
         }
     }
+
+    fn input_state(&self) -> Vec<InputFrame> {
+        if let Some(ref i) = self.input {
+            vec![InputFrame {
+                target_ray_origin: i.state(),
+                id: InputId(0),
+            }]
+        } else {
+            vec![]
+        }
+    }
 }
 
 impl Device for GoogleVRDevice {
@@ -530,7 +552,7 @@ impl Device for GoogleVRDevice {
         // Predict head matrix
         Frame {
             transform: self.fetch_head_matrix(),
-            inputs: vec![],
+            inputs: self.input_state(),
         }
     }
 
@@ -552,7 +574,15 @@ impl Device for GoogleVRDevice {
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
-        vec![]
+        if let Some(ref i) = self.input {
+            vec![InputSource {
+                handedness: i.handedness(),
+                id: InputId(0),
+                target_ray_mode: TargetRayMode::TrackedPointer,
+            }]
+        } else {
+            vec![]
+        }
     }
 
     fn set_event_dest(&mut self, dest: Sender<Event>) {
