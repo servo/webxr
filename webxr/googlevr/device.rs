@@ -25,6 +25,7 @@ use euclid::default::Size2D as DefaultSize2D;
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
+use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
@@ -354,7 +355,7 @@ impl GoogleVRDevice {
         let eye_mat = gvr::gvr_get_eye_from_head_matrix(self.ctx, eye as i32);
         // XXXManishearth we should decompose the matrix properly instead of assuming it's
         // only translation
-        let transform = Vector3D::new(-eye_mat.m[0][3], -eye_mat.m[1][3], -eye_mat.m[2][3]).into();
+        let transform = decompose_rigid(&eye_mat).inverse();
 
         let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
         let origin = if eye == gvr::gvr_eye::GVR_LEFT_EYE {
@@ -425,7 +426,7 @@ impl GoogleVRDevice {
             let m = gvr::gvr_get_head_space_from_start_space_rotation(self.ctx, next_vsync);
             self.synced_head_matrix = gvr::gvr_apply_neck_model(self.ctx, m, 1.0);
         };
-        unimplemented!("need to decompose matrix")
+        decompose_rigid(&self.synced_head_matrix)
     }
 
     unsafe fn acquire_frame(&mut self) {
@@ -632,4 +633,36 @@ fn gvr_identity_matrix() -> gvr::gvr_mat4f {
             [0.0, 0.0, 0.0, 1.0],
         ],
     }
+}
+
+fn decompose_rotation<T, U>(mat: &gvr::gvr_mat4f) -> Rotation3D<f32, T, U> {
+    // https://math.stackexchange.com/a/3183435/24293
+    let m = &mat.m;
+    if m[2][2] < 0. {
+        if m[0][0] > m[1][1] {
+            let t = 1. + m[0][0] - m[1][1] - m[2][2];
+            Rotation3D::unit_quaternion(t, m[0][1] + m[1][0], m[2][0] + m[0][2], m[1][2] - m[2][1])
+        } else {
+            let t = 1. - m[0][0] + m[1][1] - m[2][2];
+            Rotation3D::unit_quaternion(m[0][1] + m[1][0], t, m[1][2] + m[2][1], m[2][0] - m[0][2])
+        }
+    } else {
+        if m[0][0] < -m[1][1] {
+            let t = 1. - m[0][0] - m[1][1] + m[2][2];
+            Rotation3D::unit_quaternion(m[2][0] + m[0][2], m[1][2] + m[2][1], t, m[0][1] - m[1][0])
+        } else {
+            let t = 1. + m[0][0] + m[1][1] + m[2][2];
+            Rotation3D::unit_quaternion(m[1][2] - m[2][1], m[2][0] - m[0][2], m[0][1] - m[1][0], t)
+        }
+    }
+}
+
+fn decompose_translation<T>(mat: &gvr::gvr_mat4f) -> Vector3D<f32, T> {
+    Vector3D::new(mat.m[0][3], mat.m[1][3], mat.m[2][3])
+}
+
+fn decompose_rigid<T, U>(mat: &gvr::gvr_mat4f) -> RigidTransform3D<f32, T, U> {
+    // Rigid transform matrices formed by applying a rotation first and then a translation
+    // decompose cleanly based on their rotation and translation components.
+    RigidTransform3D::new(decompose_rotation(mat), decompose_translation(mat))
 }
