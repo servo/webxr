@@ -4,11 +4,11 @@
 
 //! The WebGL functionality needed by WebXR.
 
-use euclid::default::Size2D;
 use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 
 pub type WebGLContextId = usize;
+pub type WebGLTextureId = GLuint;
 
 /// A trait to get access a GL texture from a WebGL context.
 // Note that this is not serializable, we run it in the same
@@ -17,9 +17,8 @@ pub type WebGLContextId = usize;
 // though, which is the main difference between this trait and
 // the matching webrender trait.
 pub trait WebGLExternalImageApi: Send {
-    /// Lock the WebGL context, and get back a texture id, the size of the texture,
-    /// and a sync object for the texture.
-    fn lock(&self, id: WebGLContextId) -> (GLuint, Size2D<i32>, GLsync);
+    /// Lock the WebGL context, and get back a sync object for its current state.
+    fn lock(&self, id: WebGLContextId) -> GLsync;
 
     /// Unlock the WebGL context.
     fn unlock(&self, id: WebGLContextId);

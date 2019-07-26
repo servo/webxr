@@ -15,9 +15,13 @@ use crate::Viewport;
 use crate::Views;
 use crate::WebGLContextId;
 use crate::WebGLExternalImageApi;
+use crate::WebGLTextureId;
 
+use euclid::default::Size2D as UntypedSize2D;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
+
+use gleam::gl::GLsizei;
 
 use std::thread;
 use std::time::Duration;
@@ -43,7 +47,7 @@ pub type HighResTimeStamp = f64;
 // The messages that are sent from the content thread to the session thread.
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
-    SetWebGLContext(Option<WebGLContextId>),
+    SetTexture(WebGLContextId, WebGLTextureId, UntypedSize2D<GLsizei>),
     SetEventDest(Sender<Event>),
     RequestAnimationFrame(Sender<(HighResTimeStamp, Frame)>),
     RenderAnimationFrame,
@@ -91,8 +95,13 @@ impl Session {
         self.resolution
     }
 
-    pub fn set_webgl_context(&mut self, id: Option<WebGLContextId>) {
-        let _ = self.sender.send(SessionMsg::SetWebGLContext(id));
+    pub fn set_texture(
+        &mut self,
+        ctxt: WebGLContextId,
+        txt: WebGLTextureId,
+        size: UntypedSize2D<GLsizei>,
+    ) {
+        let _ = self.sender.send(SessionMsg::SetTexture(ctxt, txt, size));
     }
 
     pub fn request_animation_frame(&mut self, dest: Sender<(HighResTimeStamp, Frame)>) {
@@ -117,7 +126,7 @@ pub struct SessionThread<D> {
     receiver: Receiver<SessionMsg>,
     sender: Sender<SessionMsg>,
     webgl: Box<dyn WebGLExternalImageApi>,
-    webgl_context: Option<WebGLContextId>,
+    texture: Option<(WebGLContextId, WebGLTextureId, UntypedSize2D<GLsizei>)>,
     timestamp: HighResTimeStamp,
     running: bool,
     device: D,
@@ -133,14 +142,14 @@ impl<D: Device> SessionThread<D> {
             sender: sender.clone(),
         });
         let timestamp = 0.0;
-        let webgl_context = None;
+        let texture = None;
         let running = true;
         Ok(SessionThread {
             sender,
             receiver,
             device,
             webgl,
-            webgl_context,
+            texture,
             timestamp,
             running,
         })
@@ -176,8 +185,8 @@ impl<D: Device> SessionThread<D> {
 
     fn handle_msg(&mut self, msg: SessionMsg) -> bool {
         match msg {
-            SessionMsg::SetWebGLContext(id) => {
-                self.webgl_context = id;
+            SessionMsg::SetTexture(ctxt, txt, size) => {
+                self.texture = Some((ctxt, txt, size));
             }
             SessionMsg::SetEventDest(dest) => {
                 self.device.set_event_dest(dest);
@@ -189,10 +198,10 @@ impl<D: Device> SessionThread<D> {
             }
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
-                if let Some(id) = self.webgl_context {
-                    let (texture_id, size, sync) = self.webgl.lock(id);
-                    self.device.render_animation_frame(texture_id, size, sync);
-                    self.webgl.unlock(id);
+                if let Some((ctxt, txt, size)) = self.texture {
+                    let sync = self.webgl.lock(ctxt);
+                    self.device.render_animation_frame(txt, size, sync);
+                    self.webgl.unlock(ctxt);
                 }
             }
             SessionMsg::Quit => {
