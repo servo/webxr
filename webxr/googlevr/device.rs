@@ -555,8 +555,8 @@ impl Device for GoogleVRDevice {
         vec![]
     }
 
-    fn set_event_dest(&mut self, _dest: Sender<Event>) {
-        unimplemented!()
+    fn set_event_dest(&mut self, dest: Sender<Event>) {
+        self.events.upgrade(dest);
     }
 
     fn quit(&mut self) {

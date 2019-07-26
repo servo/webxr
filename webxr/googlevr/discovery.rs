@@ -178,11 +178,11 @@ impl GoogleVRDiscovery {
     }
 
     pub fn on_pause(&self) {
-        unimplemented!()
+        warn!("focus/blur not yet supported")
     }
 
     pub fn on_resume(&self) {
-        unimplemented!()
+        warn!("focus/blur not yet supported")
     }
 }
 
