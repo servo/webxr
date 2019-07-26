@@ -17,6 +17,7 @@ use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscovery;
 use webxr_api::MockInputMsg;
 use webxr_api::Native;
+use webxr_api::Quitter;
 use webxr_api::Receiver;
 use webxr_api::Sender;
 use webxr_api::Session;
@@ -34,6 +35,8 @@ use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 pub struct HeadlessMockDiscovery {
     gl: Rc<dyn Gl>,
@@ -41,8 +44,8 @@ pub struct HeadlessMockDiscovery {
 
 struct HeadlessDiscovery {
     gl: Rc<dyn Gl>,
-    init: MockDeviceInit,
-    receiver: Option<Receiver<MockDeviceMsg>>,
+    data: Arc<Mutex<HeadlessDeviceData>>,
+    supports_immersive: bool,
 }
 
 struct InputInfo {
@@ -53,14 +56,17 @@ struct InputInfo {
 
 struct HeadlessDevice {
     gl: Rc<dyn Gl>,
+    data: Arc<Mutex<HeadlessDeviceData>>,
+}
+
+struct HeadlessDeviceData {
     floor_transform: RigidTransform3D<f32, Native, Floor>,
     viewer_origin: RigidTransform3D<f32, Viewer, Native>,
     views: Views,
-    receiver: Receiver<MockDeviceMsg>,
-    events: EventBuffer,
     inputs: Vec<InputInfo>,
-    disconnect_callbacks: Vec<Sender<()>>,
-    connected: bool,
+    events: EventBuffer,
+    quitter: Option<Quitter>,
+    disconnected: bool,
 }
 
 impl MockDiscovery for HeadlessMockDiscovery {
@@ -69,59 +75,68 @@ impl MockDiscovery for HeadlessMockDiscovery {
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
     ) -> Result<Box<dyn Discovery>, Error> {
+        let viewer_origin = init.viewer_origin.clone();
+        let floor_transform = init.floor_origin.inverse();
+        let views = init.views.clone();
+        let data = HeadlessDeviceData {
+            floor_transform,
+            viewer_origin,
+            views,
+            inputs: vec![],
+            events: Default::default(),
+            quitter: None,
+            disconnected: false,
+        };
+        let data = Arc::new(Mutex::new(data));
+        let data_ = data.clone();
+
+        thread::spawn(move || {
+            run_loop(receiver, data_);
+        });
         Ok(Box::new(HeadlessDiscovery {
             gl: self.gl.clone(),
-            init,
-            receiver: Some(receiver),
+            data,
+            supports_immersive: init.supports_immersive,
         }))
+    }
+}
+
+fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceData>>) {
+    while let Ok(msg) = receiver.recv() {
+        if !data.lock().expect("Mutex poisoned").handle_msg(msg) {
+            break;
+        }
     }
 }
 
 impl Discovery for HeadlessDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
-        if !self.supports_session(mode) {
+        if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
         let gl = self.gl.clone();
-        let receiver = self.receiver.take().ok_or(Error::NoMatchingDevice)?;
-        let viewer_origin = self.init.viewer_origin.clone();
-        let floor_transform = self.init.floor_origin.inverse();
-        let views = self.init.views.clone();
-        xr.run_on_main_thread(move || {
-            Ok(HeadlessDevice {
-                gl,
-                floor_transform,
-                viewer_origin,
-                views,
-                receiver,
-                events: Default::default(),
-                disconnect_callbacks: vec![],
-                connected: true,
-                inputs: vec![],
-            })
-        })
+        let data = self.data.clone();
+        xr.run_on_main_thread(move || Ok(HeadlessDevice { gl, data }))
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        mode == SessionMode::Inline || self.init.supports_immersive
+        mode == SessionMode::Inline || self.supports_immersive
     }
 }
 
 impl Device for HeadlessDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
-        self.floor_transform.clone()
+        self.data.lock().unwrap().floor_transform.clone()
     }
 
     fn views(&self) -> Views {
-        self.views.clone()
+        self.data.lock().unwrap().views.clone()
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
-        while let Ok(msg) = self.receiver.try_recv() {
-            self.handle_msg(msg);
-        }
-        let transform = self.viewer_origin;
-        let inputs = self
+        let data = self.data.lock().unwrap();
+        let transform = data.viewer_origin;
+        let inputs = data
             .inputs
             .iter()
             .filter(|i| i.active)
@@ -142,23 +157,15 @@ impl Device for HeadlessDevice {
     }
 
     fn set_event_dest(&mut self, dest: Sender<Event>) {
-        self.events.upgrade(dest)
-    }
-
-    fn connected(&mut self) -> bool {
-        if self.connected {
-            true
-        } else {
-            for callback in self.disconnect_callbacks.drain(..) {
-                let _ = callback.send(());
-            }
-            false
-        }
+        self.data.lock().unwrap().events.upgrade(dest)
     }
 
     fn quit(&mut self) {
-        self.connected = false;
-        self.events.callback(Event::SessionEnd);
+        self.data.lock().unwrap().events.callback(Event::SessionEnd);
+    }
+
+    fn set_quitter(&mut self, quitter: Quitter) {
+        self.data.lock().unwrap().quitter = Some(quitter);
     }
 }
 
@@ -168,8 +175,8 @@ impl HeadlessMockDiscovery {
     }
 }
 
-impl HeadlessDevice {
-    fn handle_msg(&mut self, msg: MockDeviceMsg) {
+impl HeadlessDeviceData {
+    fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
@@ -202,11 +209,14 @@ impl HeadlessDevice {
                     }
                 }
             }
-            MockDeviceMsg::Disconnect(sender) => {
-                self.connected = false;
-                self.disconnect_callbacks.push(sender);
-                self.events.callback(Event::SessionEnd);
+            MockDeviceMsg::Disconnect(s) => {
+                self.disconnected = true;
+                self.quitter.as_ref().map(|q| q.quit());
+                // notify the client that we're done disconnecting
+                let _ = s.send(());
+                return false;
             }
         }
+        true
     }
 }

@@ -50,6 +50,18 @@ enum SessionMsg {
     Quit,
 }
 
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+#[derive(Clone)]
+pub struct Quitter {
+    sender: Sender<SessionMsg>,
+}
+
+impl Quitter {
+    pub fn quit(&self) {
+        let _ = self.sender.send(SessionMsg::Quit);
+    }
+}
+
 /// An object that represents an XR session.
 /// This is owned by the content thread.
 /// https://www.w3.org/TR/webxr/#xrsession-interface
@@ -113,11 +125,13 @@ pub struct SessionThread<D> {
 
 impl<D: Device> SessionThread<D> {
     pub fn new(
-        device: D,
+        mut device: D,
         webgl: Box<dyn WebGLExternalImageApi>,
     ) -> Result<SessionThread<D>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
-
+        device.set_quitter(Quitter {
+            sender: sender.clone(),
+        });
         let timestamp = 0.0;
         let webgl_context = None;
         let running = true;
@@ -148,16 +162,19 @@ impl<D: Device> SessionThread<D> {
     }
 
     pub fn run(&mut self) {
-        while self.running {
+        loop {
             if let Ok(msg) = self.receiver.recv() {
-                self.handle_msg(msg);
+                if !self.handle_msg(msg) {
+                    self.running = false;
+                    break;
+                }
             } else {
                 break;
             }
         }
     }
 
-    fn handle_msg(&mut self, msg: SessionMsg) {
+    fn handle_msg(&mut self, msg: SessionMsg) -> bool {
         match msg {
             SessionMsg::SetWebGLContext(id) => {
                 self.webgl_context = id;
@@ -179,11 +196,11 @@ impl<D: Device> SessionThread<D> {
                 }
             }
             SessionMsg::Quit => {
-                self.running = false;
                 self.device.quit();
+                return false;
             }
         }
-        self.running = self.running && self.device.connected();
+        true
     }
 }
 

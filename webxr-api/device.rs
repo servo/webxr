@@ -10,6 +10,7 @@ use crate::Floor;
 use crate::Frame;
 use crate::InputSource;
 use crate::Native;
+use crate::Quitter;
 use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
@@ -63,9 +64,8 @@ pub trait Device: 'static {
     /// Sets the event handling channel
     fn set_event_dest(&mut self, dest: Sender<Event>);
 
-    /// Whether the device is still connected
-    fn connected(&mut self) -> bool;
-
     /// Quit the session
     fn quit(&mut self);
+
+    fn set_quitter(&mut self, quitter: Quitter);
 }
