@@ -68,6 +68,7 @@ pub(crate) struct GoogleVRDevice {
     frame: *mut gvr::gvr_frame,
     synced_head_matrix: gvr::gvr_mat4f,
     fbo_id: u32,
+    fbo_texture: u32,
     presenting: bool,
     frame_bound: bool,
 }
@@ -114,6 +115,7 @@ impl GoogleVRDevice {
             frame: ptr::null_mut(),
             synced_head_matrix: gvr_identity_matrix(),
             fbo_id: 0,
+            fbo_texture: 0,
             presenting: false,
             frame_bound: false,
         };
@@ -156,6 +158,7 @@ impl GoogleVRDevice {
             frame: ptr::null_mut(),
             synced_head_matrix: gvr_identity_matrix(),
             fbo_id: 0,
+            fbo_texture: 0,
             presenting: false,
             frame_bound: false,
         };
@@ -435,6 +438,78 @@ impl GoogleVRDevice {
 
         self.frame = gvr::gvr_swap_chain_acquire_frame(self.swap_chain);
     }
+
+    fn render_layer(&mut self, texture_id: u32, texture_size: DefaultSize2D<i32>) {
+        if self.frame.is_null() {
+            warn!("null frame when calling render_layer");
+            return;
+        }
+        debug_assert!(self.fbo_id > 0);
+
+        unsafe {
+            // Save current fbo to restore it when the frame is submitted.
+            let mut current_fbo = 0;
+            gl::GetIntegerv(gl::FRAMEBUFFER_BINDING, &mut current_fbo);
+
+            if self.fbo_texture != texture_id {
+                // Attach external texture to the used later in BlitFramebuffer.
+                gl::BindFramebuffer(gl::FRAMEBUFFER, self.fbo_id);
+                gl::FramebufferTexture2D(
+                    gl::FRAMEBUFFER,
+                    gl::COLOR_ATTACHMENT0,
+                    gl::TEXTURE_2D,
+                    texture_id,
+                    0,
+                );
+                self.fbo_texture = texture_id;
+            }
+
+            // BlitFramebuffer: external texture to gvr pixel buffer
+            self.bind_framebuffer();
+            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.fbo_id);
+            gl::BlitFramebuffer(
+                0,
+                0,
+                texture_size.width,
+                texture_size.height,
+                0,
+                0,
+                self.render_size.width,
+                self.render_size.height,
+                gl::COLOR_BUFFER_BIT,
+                gl::LINEAR,
+            );
+            gvr::gvr_frame_unbind(self.frame);
+            self.frame_bound = false;
+            // Restore bound fbo
+            gl::BindFramebuffer(gl::FRAMEBUFFER, current_fbo as u32);
+
+            // set up uvs
+            // XXXManishearth do we need to negotiate size here?
+            // gvr::gvr_buffer_viewport_set_source_uv(self.left_eye_vp, gvr_texture_bounds(&layer.left_bounds));
+            // gvr::gvr_buffer_viewport_set_source_uv(self.right_eye_vp, gvr_texture_bounds(&layer.right_bounds));
+        }
+    }
+
+    fn submit_frame(&mut self) {
+        if self.frame.is_null() {
+            warn!("null frame with context");
+            return;
+        }
+
+        unsafe {
+            if self.frame_bound {
+                gvr::gvr_frame_unbind(self.frame);
+                self.frame_bound = false;
+            }
+            // submit frame
+            gvr::gvr_frame_submit(
+                mem::transmute(&self.frame),
+                self.viewport_list,
+                self.synced_head_matrix,
+            );
+        }
+    }
 }
 
 impl Device for GoogleVRDevice {
@@ -461,11 +536,19 @@ impl Device for GoogleVRDevice {
 
     fn render_animation_frame(
         &mut self,
-        _texture_id: u32,
-        _size: DefaultSize2D<i32>,
-        _sync: GLsync,
+        texture_id: u32,
+        texture_size: DefaultSize2D<i32>,
+        sync: Option<GLsync>,
     ) {
-        unimplemented!()
+        self.render_layer(texture_id, texture_size);
+        self.submit_frame();
+        if let Some(sync) = sync {
+            unsafe {
+                // XXXManishearth we really should figure out how
+                // to use gleam here
+                gl::WaitSync(sync as *const _, 0, gl::TIMEOUT_IGNORED);
+            }
+        }
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
