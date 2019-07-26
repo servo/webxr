@@ -13,6 +13,7 @@ use webxr_api::Quitter;
 use webxr_api::RightEye;
 use webxr_api::Sender;
 use webxr_api::View;
+use webxr_api::Viewer;
 use webxr_api::Views;
 
 use crate::gl;
@@ -38,6 +39,11 @@ use crate::jni_utils::JNIScope;
 #[cfg(target_os = "android")]
 use android_injected_glue::ffi as ndk;
 
+// 50ms is a good estimate recommended by the GVR Team.
+// It takes in account the time between frame submission (without vsync) and
+// when the rendered image is sent to the physical pixels on the display.
+const PREDICTION_OFFSET_NANOS: i64 = 50000000; // 50ms
+
 pub(crate) struct GoogleVRDevice {
     events: EventBuffer,
     multiview: bool,
@@ -60,8 +66,10 @@ pub(crate) struct GoogleVRDevice {
     render_size: gvr::gvr_sizei,
     swap_chain: *mut gvr::gvr_swap_chain,
     frame: *mut gvr::gvr_frame,
+    synced_head_matrix: gvr::gvr_mat4f,
     fbo_id: u32,
     presenting: bool,
+    frame_bound: bool,
 }
 
 fn empty_view<T>() -> View<T> {
@@ -104,8 +112,10 @@ impl GoogleVRDevice {
             },
             swap_chain: ptr::null_mut(),
             frame: ptr::null_mut(),
+            synced_head_matrix: gvr_identity_matrix(),
             fbo_id: 0,
             presenting: false,
+            frame_bound: false,
         };
         unsafe {
             device.init();
@@ -144,8 +154,10 @@ impl GoogleVRDevice {
             },
             swap_chain: ptr::null_mut(),
             frame: ptr::null_mut(),
+            synced_head_matrix: gvr_identity_matrix(),
             fbo_id: 0,
             presenting: false,
+            frame_bound: false,
         };
         unsafe {
             device.init();
@@ -344,6 +356,85 @@ impl GoogleVRDevice {
             viewport,
         }
     }
+
+    fn bind_framebuffer(&mut self) {
+        // No op
+        if self.frame.is_null() {
+            warn!("null frame with context");
+            return;
+        }
+
+        unsafe {
+            if self.frame_bound {
+                // Required to avoid some warnings from the GVR SDK.
+                // It doesn't like binding the same framebuffer multiple times.
+                gvr::gvr_frame_unbind(self.frame);
+            }
+            // gvr_frame_bind_buffer may make the current active texture unit dirty
+            let mut active_unit = 0;
+            gl::GetIntegerv(gl::ACTIVE_TEXTURE, &mut active_unit);
+
+            // Bind daydream FBO
+            gvr::gvr_frame_bind_buffer(self.frame, 0);
+            self.frame_bound = true;
+
+            // Restore texture unit
+            gl::ActiveTexture(active_unit as u32);
+        }
+    }
+
+    fn update_recommended_buffer_viewports(&self) {
+        unsafe {
+            gvr::gvr_get_recommended_buffer_viewports(self.ctx, self.viewport_list);
+            if self.multiview {
+                // gvr_get_recommended_buffer_viewports function assumes that the client is not
+                // using multiview to render to multiple layers simultaneously.
+                // The uv and source layers need to be updated for multiview.
+                let fullscreen_uv = gvr_texture_bounds(&[0.0, 0.0, 1.0, 1.0]);
+                // Left eye
+                gvr::gvr_buffer_viewport_set_source_uv(self.left_eye_vp, fullscreen_uv);
+                gvr::gvr_buffer_viewport_set_source_layer(self.left_eye_vp, 0);
+                // Right eye
+                gvr::gvr_buffer_viewport_set_source_uv(self.right_eye_vp, fullscreen_uv);
+                gvr::gvr_buffer_viewport_set_source_layer(self.right_eye_vp, 1);
+                // Update viewport list
+                gvr::gvr_buffer_viewport_list_set_item(self.viewport_list, 0, self.left_eye_vp);
+                gvr::gvr_buffer_viewport_list_set_item(self.viewport_list, 1, self.right_eye_vp);
+            }
+        }
+    }
+
+    fn fetch_head_matrix(&mut self) -> RigidTransform3D<f32, Viewer, Native> {
+        let mut next_vsync = unsafe { gvr::gvr_get_time_point_now() };
+        next_vsync.monotonic_system_time_nanos += PREDICTION_OFFSET_NANOS;
+        unsafe {
+            let m = gvr::gvr_get_head_space_from_start_space_rotation(self.ctx, next_vsync);
+            self.synced_head_matrix = gvr::gvr_apply_neck_model(self.ctx, m, 1.0);
+        };
+        unimplemented!("need to decompose matrix")
+    }
+
+    unsafe fn acquire_frame(&mut self) {
+        if !self.frame.is_null() {
+            warn!("frame not submitted");
+            // Release acquired frame if the user has not called submit_Frame()
+            gvr::gvr_frame_submit(
+                mem::transmute(&self.frame),
+                self.viewport_list,
+                self.synced_head_matrix,
+            );
+        }
+
+        self.update_recommended_buffer_viewports();
+        // Handle resize
+        let size = self.recommended_render_size();
+        if size.width != self.render_size.width || size.height != self.render_size.height {
+            gvr::gvr_swap_chain_resize_buffer(self.swap_chain, 0, size);
+            self.render_size = size;
+        }
+
+        self.frame = gvr::gvr_swap_chain_acquire_frame(self.swap_chain);
+    }
 }
 
 impl Device for GoogleVRDevice {
@@ -358,7 +449,14 @@ impl Device for GoogleVRDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
-        unimplemented!()
+        unsafe {
+            self.acquire_frame();
+        }
+        // Predict head matrix
+        Frame {
+            transform: self.fetch_head_matrix(),
+            inputs: vec![],
+        }
     }
 
     fn render_animation_frame(
@@ -399,4 +497,26 @@ fn fov_to_projection_matrix<T, U>(
     let top = fov.top.to_radians().tan() * near;
     let bottom = -fov.bottom.to_radians().tan() * near;
     Transform3D::ortho(left, right, bottom, top, near, far)
+}
+
+#[inline]
+fn gvr_texture_bounds(array: &[f32; 4]) -> gvr::gvr_rectf {
+    gvr::gvr_rectf {
+        left: array[0],
+        right: array[0] + array[2],
+        bottom: array[1],
+        top: array[1] + array[3],
+    }
+}
+
+#[inline]
+fn gvr_identity_matrix() -> gvr::gvr_mat4f {
+    gvr::gvr_mat4f {
+        m: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    }
 }
