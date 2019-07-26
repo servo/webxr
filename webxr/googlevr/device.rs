@@ -7,15 +7,23 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
+use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::RightEye;
 use webxr_api::Sender;
+use webxr_api::View;
 use webxr_api::Views;
 
 use crate::gl;
 
-use euclid::default::Size2D;
+use euclid::default::Size2D as DefaultSize2D;
+use euclid::Point2D;
+use euclid::Rect;
 use euclid::RigidTransform3D;
+use euclid::Size2D;
+use euclid::Transform3D;
+use euclid::Vector3D;
 
 use gvr_sys as gvr;
 use gvr_sys::gvr_color_format_type::*;
@@ -26,15 +34,19 @@ use std::{mem, ptr};
 use super::discovery::SendPtr;
 
 #[cfg(target_os = "android")]
-use android_injected_glue::ffi as ndk;
-#[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
+#[cfg(target_os = "android")]
+use android_injected_glue::ffi as ndk;
 
 pub(crate) struct GoogleVRDevice {
     events: EventBuffer,
     multiview: bool,
     multisampling: bool,
     depth: bool,
+    left_view: View<LeftEye>,
+    right_view: View<RightEye>,
+    near: f32,
+    far: f32,
 
     #[cfg(target_os = "android")]
     java_class: ndk::jclass,
@@ -52,6 +64,14 @@ pub(crate) struct GoogleVRDevice {
     presenting: bool,
 }
 
+fn empty_view<T>() -> View<T> {
+    View {
+        transform: RigidTransform3D::identity(),
+        projection: Transform3D::identity(),
+        viewport: Default::default(),
+    }
+}
+
 impl GoogleVRDevice {
     #[cfg(target_os = "android")]
     pub fn new(
@@ -65,6 +85,11 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
+            left_view: empty_view(),
+            right_view: empty_view(),
+            // https://github.com/servo/webxr/issues/32
+            near: 0.1,
+            far: 1000.0,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -88,6 +113,7 @@ impl GoogleVRDevice {
         // XXXManishearth figure out how to block until presentation
         // starts
         device.start_present();
+        device.initialize_views();
         Ok(device)
     }
 
@@ -101,6 +127,11 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
+            left_view: empty_view(),
+            right_view: empty_view(),
+            // https://github.com/servo/webxr/issues/32
+            near: 0.1,
+            far: 1000.0,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -122,6 +153,7 @@ impl GoogleVRDevice {
         // XXXManishearth figure out how to block until presentation
         // starts
         device.start_present();
+        device.initialize_views();
         Ok(device)
     }
 
@@ -221,7 +253,6 @@ impl GoogleVRDevice {
         }
     }
 
-
     #[cfg(target_os = "android")]
     fn start_present(&mut self) {
         if self.presenting {
@@ -280,22 +311,62 @@ impl GoogleVRDevice {
     fn stop_present(&mut self) {
         self.presenting = false;
     }
+
+    fn initialize_views(&mut self) {
+        unsafe {
+            self.left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
+            self.right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
+        }
+    }
+
+    unsafe fn fetch_eye<T>(&self, eye: gvr::gvr_eye, vp: *mut gvr::gvr_buffer_viewport) -> View<T> {
+        let eye_fov = gvr::gvr_buffer_viewport_get_source_fov(vp);
+        let projection = fov_to_projection_matrix(&eye_fov, self.near, self.far);
+
+        // this matrix converts from head space to eye space,
+        // i.e. it's the inverse of the offset
+        let eye_mat = gvr::gvr_get_eye_from_head_matrix(self.ctx, eye as i32);
+        // XXXManishearth we should decompose the matrix properly instead of assuming it's
+        // only translation
+        let transform = Vector3D::new(-eye_mat.m[0][3], -eye_mat.m[1][3], -eye_mat.m[2][3]).into();
+
+        let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
+        let origin = if eye == gvr::gvr_eye::GVR_LEFT_EYE {
+            Point2D::origin()
+        } else {
+            Point2D::new(self.render_size.width / 2, 0)
+        };
+        let viewport = Rect::new(origin, size);
+
+        View {
+            projection,
+            transform,
+            viewport,
+        }
+    }
 }
 
 impl Device for GoogleVRDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
-        unimplemented!()
+        // GoogleVR doesn't know about the floor
+        // XXXManishearth perhaps we should report a guesstimate value here
+        RigidTransform3D::identity()
     }
 
     fn views(&self) -> Views {
-        unimplemented!()
+        Views::Stereo(self.left_view.clone(), self.right_view.clone())
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
         unimplemented!()
     }
 
-    fn render_animation_frame(&mut self, _texture_id: u32, _size: Size2D<i32>, _sync: GLsync) {
+    fn render_animation_frame(
+        &mut self,
+        _texture_id: u32,
+        _size: DefaultSize2D<i32>,
+        _sync: GLsync,
+    ) {
         unimplemented!()
     }
 
@@ -315,4 +386,17 @@ impl Device for GoogleVRDevice {
     fn set_quitter(&mut self, _: Quitter) {
         // do nothing for now until we need the quitter
     }
+}
+
+#[inline]
+fn fov_to_projection_matrix<T, U>(
+    fov: &gvr::gvr_rectf,
+    near: f32,
+    far: f32,
+) -> Transform3D<f32, T, U> {
+    let left = -fov.left.to_radians().tan() * near;
+    let right = fov.right.to_radians().tan() * near;
+    let top = fov.top.to_radians().tan() * near;
+    let bottom = -fov.bottom.to_radians().tan() * near;
+    Transform3D::ortho(left, right, bottom, top, near, far)
 }
