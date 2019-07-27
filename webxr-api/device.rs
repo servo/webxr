@@ -55,7 +55,12 @@ pub trait Device: 'static {
     /// This method should render a GL texture to the device.
     /// While this method is being called, the device has unique access
     /// to the texture. The texture should be sync'd using glWaitSync before being used.
-    fn render_animation_frame(&mut self, texture_id: u32, size: UntypedSize2D<i32>, sync: GLsync);
+    fn render_animation_frame(
+        &mut self,
+        texture_id: u32,
+        size: UntypedSize2D<i32>,
+        sync: Option<GLsync>,
+    );
 
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism

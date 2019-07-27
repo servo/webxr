@@ -148,8 +148,11 @@ impl Device for HeadlessDevice {
         Frame { transform, inputs }
     }
 
-    fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: GLsync) {
-        self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+    fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: Option<GLsync>) {
+        if let Some(sync) = sync {
+            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        }
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
