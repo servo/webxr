@@ -18,7 +18,7 @@ pub type WebGLTextureId = GLuint;
 // the matching webrender trait.
 pub trait WebGLExternalImageApi: Send {
     /// Lock the WebGL context, and get back a sync object for its current state.
-    fn lock(&self, id: WebGLContextId) -> GLsync;
+    fn lock(&self, id: WebGLContextId) -> Option<GLsync>;
 
     /// Unlock the WebGL context.
     fn unlock(&self, id: WebGLContextId);

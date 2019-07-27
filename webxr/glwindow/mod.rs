@@ -112,7 +112,12 @@ impl Device for GlWindowDevice {
         }
     }
 
-    fn render_animation_frame(&mut self, texture_id: u32, size: UntypedSize2D<i32>, sync: GLsync) {
+    fn render_animation_frame(
+        &mut self,
+        texture_id: u32,
+        size: UntypedSize2D<i32>,
+        sync: Option<GLsync>,
+    ) {
         self.window.make_current();
 
         let width = size.width as GLsizei;
@@ -121,8 +126,12 @@ impl Device for GlWindowDevice {
 
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
-        self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        if let Some(sync) = sync {
+            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        }
 
         self.gl
             .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
