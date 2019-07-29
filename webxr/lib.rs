@@ -4,8 +4,22 @@
 
 //! This crate defines the Rust implementation of WebXR for various devices.
 
+#[macro_use]
+extern crate log;
+
 #[cfg(feature = "glwindow")]
 pub mod glwindow;
 
 #[cfg(feature = "headless")]
 pub mod headless;
+
+#[cfg(feature = "googlevr")]
+pub mod googlevr;
+
+#[cfg(feature = "googlevr")]
+mod gl {
+    include!(concat!(env!("OUT_DIR"), "/gles_bindings.rs"));
+}
+
+#[cfg(all(feature = "googlevr", target_os = "android"))]
+pub(crate) mod jni_utils;
