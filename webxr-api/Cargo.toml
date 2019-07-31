@@ -25,4 +25,5 @@ ipc = ["serde", "ipc-channel", "euclid/serde"]
 euclid = "0.20"
 gleam = "0.6"
 ipc-channel = { version = "0.11", optional = true }
+log = "0.4"
 serde = { version = "1.0", optional = true }
