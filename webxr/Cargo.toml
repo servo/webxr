@@ -21,11 +21,13 @@ build = "build.rs"
 path = "lib.rs"
 
 [features]
+egl = []
 gles = []
 glwindow = ["glutin"]
 headless = []
 ipc = ["webxr-api/ipc"]
 googlevr = ["gvr-sys", "android_injected_glue", "gles"]
+magicleap = ["egl"]
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }
@@ -40,3 +42,4 @@ android_injected_glue = { version = "0.2.2", optional = true }
 
 [build-dependencies]
 gl_generator = "0.11"
+bindgen = "0.49.0"

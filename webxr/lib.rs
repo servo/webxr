@@ -18,3 +18,9 @@ mod gles;
 
 #[cfg(all(feature = "googlevr", target_os = "android"))]
 pub(crate) mod jni_utils;
+
+#[cfg(feature = "magicleap")]
+pub mod magicleap;
+
+#[cfg(feature = "egl")]
+mod egl;
