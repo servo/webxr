@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use gleam::gl::GLsync;
 
 use webxr_api::Device;
@@ -19,7 +23,7 @@ use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
 
-use crate::gl;
+use crate::gles as gl;
 
 use euclid::default::Size2D as DefaultSize2D;
 use euclid::Point2D;
@@ -34,6 +38,9 @@ use gvr_sys as gvr;
 use gvr_sys::gvr_color_format_type::*;
 use gvr_sys::gvr_depth_stencil_format_type::*;
 use gvr_sys::gvr_feature::*;
+
+use log::warn;
+
 use std::{mem, ptr};
 
 use super::discovery::SendPtr;
