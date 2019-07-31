@@ -74,3 +74,13 @@ pub trait Device: 'static {
 
     fn set_quitter(&mut self, quitter: Quitter);
 }
+
+impl Discovery for Box<dyn Discovery> {
+    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+        (&mut **self).request_session(mode, xr)
+    }
+
+    fn supports_session(&self, mode: SessionMode) -> bool {
+        (&**self).supports_session(mode)
+    }
+}
