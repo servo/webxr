@@ -11,7 +11,8 @@ use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
     ApplicationInfo, Entry, ExtensionSet, FormFactor, Fovf, FrameStream, FrameWaiter, Graphics,
-    Instance, Posef, Quaternionf, ReferenceSpaceType, Session, Space, Vector3f,
+    Instance, Posef, Quaternionf, ReferenceSpaceType, Session, Space, Swapchain,
+    SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags, Vector3f,
     ViewConfigurationType,
 };
 use std::rc::Rc;
@@ -113,6 +114,8 @@ struct OpenXrDevice {
     space: Space,
     left_view: View<LeftEye>,
     right_view: View<RightEye>,
+    left_swapchain: Swapchain<D3D11>,
+    right_swapchain: Swapchain<D3D11>,
 }
 
 impl OpenXrDevice {
@@ -219,6 +222,37 @@ impl OpenXrDevice {
             viewport: right_vp,
         };
 
+        // Create swapchains
+
+        // XXXManishearth should we be doing this, or letting Servo set the format?
+        let format = *session
+            .enumerate_swapchain_formats()
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?
+            .get(0)
+            .ok_or(Error::BackendSpecific(
+                "No available swapchain formats".into(),
+            ))?;
+
+        let swapchain_create_info = SwapchainCreateInfo {
+            create_flags: SwapchainCreateFlags::EMPTY,
+            usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
+            format,
+            sample_count: 1,
+            // XXXManishearth what if the recommended widths are different?
+            width: left_view_configuration.recommended_image_rect_width,
+            height: left_view_configuration.recommended_image_rect_height,
+            face_count: 1,
+            array_size: 1,
+            mip_count: 1,
+        };
+
+        let left_swapchain = session
+            .create_swapchain(&swapchain_create_info)
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+        let right_swapchain = session
+            .create_swapchain(&swapchain_create_info)
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+
         Ok(OpenXrDevice {
             events: Default::default(),
             gl,
@@ -230,6 +264,8 @@ impl OpenXrDevice {
             space,
             left_view,
             right_view,
+            left_swapchain,
+            right_swapchain,
         })
     }
 }
