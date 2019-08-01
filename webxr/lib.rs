@@ -24,3 +24,6 @@ pub mod magicleap;
 
 #[cfg(feature = "egl")]
 mod egl;
+
+#[cfg(feature = "openxr-api")]
+pub mod openxr;
