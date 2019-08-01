@@ -6,14 +6,14 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
-use gleam::gl::{self, GLsizei, GLsync, GLuint, Gl};
+use gleam::gl::{self, GLsync, GLuint, Gl};
 use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
-    ApplicationInfo, Entry, ExtensionSet, FormFactor, Fovf, FrameStream, FrameWaiter, Graphics,
-    Instance, Posef, Quaternionf, ReferenceSpaceType, Session, Space, Swapchain,
-    SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags, Vector3f,
-    ViewConfigurationType,
+    self, ApplicationInfo, CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet,
+    Extent2Di, FormFactor, Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef,
+    Quaternionf, ReferenceSpaceType, Session, Space, Swapchain, SwapchainCreateFlags,
+    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -45,21 +45,13 @@ use wio::com::ComPtr;
 
 const HEIGHT: f32 = 1.0;
 
-pub trait GlWindow {
-    fn make_current(&mut self);
-    fn swap_buffers(&mut self);
-    fn size(&self) -> UntypedSize2D<GLsizei>;
-    fn new_window(&self) -> Result<Box<dyn GlWindow>, ()>;
-}
-
 pub struct OpenXrDiscovery {
     gl: Rc<dyn Gl>,
-    factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
 }
 
 impl OpenXrDiscovery {
-    pub fn new(gl: Rc<dyn Gl>, factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>) -> Self {
-        Self { gl, factory }
+    pub fn new(gl: Rc<dyn Gl>) -> Self {
+        Self { gl }
     }
 }
 
@@ -91,8 +83,7 @@ impl Discovery for OpenXrDiscovery {
 
         if self.supports_session(mode) {
             let gl = self.gl.clone();
-            let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
-            xr.run_on_main_thread(move || OpenXrDevice::new(gl, window, instance))
+            xr.run_on_main_thread(move || OpenXrDevice::new(gl, instance))
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -104,27 +95,29 @@ impl Discovery for OpenXrDiscovery {
 }
 
 struct OpenXrDevice {
+    #[allow(unused)]
     gl: Rc<dyn Gl>,
-    window: Box<dyn GlWindow>,
+    #[allow(unused)]
     read_fbo: GLuint,
     events: EventBuffer,
     session: Session<D3D11>,
     frame_waiter: FrameWaiter,
-    _frame_stream: FrameStream<D3D11>,
+    frame_stream: FrameStream<D3D11>,
+    frame_state: FrameState,
     space: Space,
+    openxr_views: Vec<openxr::View>,
+    left_extent: Extent2Di,
+    right_extent: Extent2Di,
     left_view: View<LeftEye>,
     right_view: View<RightEye>,
     left_swapchain: Swapchain<D3D11>,
+    left_image: u32,
     right_swapchain: Swapchain<D3D11>,
+    right_image: u32,
 }
 
 impl OpenXrDevice {
-    fn new(
-        gl: Rc<dyn Gl>,
-        mut window: Box<dyn GlWindow>,
-        instance: Instance,
-    ) -> Result<OpenXrDevice, Error> {
-        window.make_current();
+    fn new(gl: Rc<dyn Gl>, instance: Instance) -> Result<OpenXrDevice, Error> {
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
@@ -178,6 +171,14 @@ impl OpenXrDevice {
 
         let left_view_configuration = view_configuration_views[0];
         let right_view_configuration = view_configuration_views[1];
+        let left_extent = Extent2Di {
+            width: left_view_configuration.recommended_image_rect_width as i32,
+            height: left_view_configuration.recommended_image_rect_height as i32,
+        };
+        let right_extent = Extent2Di {
+            width: right_view_configuration.recommended_image_rect_width as i32,
+            height: right_view_configuration.recommended_image_rect_height as i32,
+        };
 
         // https://github.com/servo/webxr/issues/32
         let near = 0.1;
@@ -256,12 +257,17 @@ impl OpenXrDevice {
         Ok(OpenXrDevice {
             events: Default::default(),
             gl,
-            window,
             read_fbo,
             session,
-            _frame_stream: frame_stream,
+            frame_stream,
             frame_waiter,
+            frame_state,
             space,
+            left_extent,
+            right_extent,
+            left_image: 0,
+            right_image: 0,
+            openxr_views: views,
             left_view,
             right_view,
             left_swapchain,
@@ -281,16 +287,18 @@ impl Device for OpenXrDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
-        let frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        self.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, views) = self
             .session
             .locate_views(
                 ViewConfigurationType::PRIMARY_STEREO,
-                frame_state.predicted_display_time,
+                self.frame_state.predicted_display_time,
                 &self.space,
             )
             .expect("error locating views");
-        let view = views[0];
+        self.openxr_views = views;
+        let view = self.openxr_views[0];
         let rotation = Rotation3D::unit_quaternion(
             view.pose.orientation.x,
             view.pose.orientation.y,
@@ -303,6 +311,19 @@ impl Device for OpenXrDevice {
             view.pose.position.z,
         );
         let transform = RigidTransform3D::new(rotation, translation);
+
+        self.frame_stream
+            .begin()
+            .expect("failed to start frame stream");
+
+        self.left_image = self.left_swapchain.acquire_image().unwrap();
+        self.left_swapchain
+            .wait_image(openxr::Duration::INFINITE)
+            .unwrap();
+        self.right_image = self.right_swapchain.acquire_image().unwrap();
+        self.right_swapchain
+            .wait_image(openxr::Duration::INFINITE)
+            .unwrap();
         Frame {
             transform,
             inputs: vec![],
@@ -311,52 +332,92 @@ impl Device for OpenXrDevice {
 
     fn render_animation_frame(
         &mut self,
-        texture_id: u32,
-        size: UntypedSize2D<i32>,
-        sync: Option<GLsync>,
+        _texture_id: u32,
+        _size: UntypedSize2D<i32>,
+        _sync: Option<GLsync>,
     ) {
-        self.window.make_current();
+        let _left_image = self.left_swapchain.enumerate_images().unwrap()[self.left_image as usize];
+        let _right_image =
+            self.right_swapchain.enumerate_images().unwrap()[self.right_image as usize];
+        // TODO blit to left and right swapchain image
+        self.left_swapchain.release_image().unwrap();
+        self.right_swapchain.release_image().unwrap();
 
-        let width = size.width as GLsizei;
-        let height = size.height as GLsizei;
-        let inner_size = self.window.size();
+        self.frame_stream
+            .end(
+                self.frame_state.predicted_display_time,
+                EnvironmentBlendMode::ADDITIVE,
+                &[&CompositionLayerProjection::new()
+                    .space(&self.space)
+                    .views(&[
+                        openxr::CompositionLayerProjectionView::new()
+                            .pose(self.openxr_views[0].pose)
+                            .fov(self.openxr_views[0].fov)
+                            .sub_image(
+                                // XXXManishearth is this correct?
+                                openxr::SwapchainSubImage::new()
+                                    .swapchain(&self.left_swapchain)
+                                    .image_array_index(0)
+                                    .image_rect(openxr::Rect2Di {
+                                        offset: openxr::Offset2Di { x: 0, y: 0 },
+                                        extent: self.left_extent,
+                                    }),
+                            ),
+                        openxr::CompositionLayerProjectionView::new()
+                            .pose(self.openxr_views[0].pose)
+                            .fov(self.openxr_views[0].fov)
+                            .sub_image(
+                                openxr::SwapchainSubImage::new()
+                                    .swapchain(&self.right_swapchain)
+                                    .image_array_index(0)
+                                    .image_rect(openxr::Rect2Di {
+                                        offset: openxr::Offset2Di { x: 0, y: 0 },
+                                        extent: self.right_extent,
+                                    }),
+                            ),
+                    ])],
+            )
+            .unwrap();
 
-        self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
-        self.gl.clear(gl::COLOR_BUFFER_BIT);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        // let width = size.width as GLsizei;
+        // let height = size.height as GLsizei;
 
-        if let Some(sync) = sync {
-            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-        }
+        // self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
+        // self.gl.clear(gl::COLOR_BUFFER_BIT);
+        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        self.gl
-            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        // if let Some(sync) = sync {
+        //     self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+        //     debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        // }
 
-        self.gl.framebuffer_texture_2d(
-            gl::READ_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            gl::TEXTURE_2D,
-            texture_id,
-            0,
-        );
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        // self.gl
+        //     .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
+        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        self.gl.viewport(0, 0, width, height);
-        self.gl.blit_framebuffer(
-            0,
-            0,
-            width,
-            height,
-            0,
-            0,
-            inner_size.width,
-            inner_size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::NEAREST,
-        );
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        // self.gl.framebuffer_texture_2d(
+        //     gl::READ_FRAMEBUFFER,
+        //     gl::COLOR_ATTACHMENT0,
+        //     gl::TEXTURE_2D,
+        //     texture_id,
+        //     0,
+        // );
+        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        // self.gl.viewport(0, 0, width, height);
+        // self.gl.blit_framebuffer(
+        //     0,
+        //     0,
+        //     width,
+        //     height,
+        //     0,
+        //     0,
+        //     inner_size.width,
+        //     inner_size.height,
+        //     gl::COLOR_BUFFER_BIT,
+        //     gl::NEAREST,
+        // );
+        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
