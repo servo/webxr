@@ -57,9 +57,10 @@ impl OpenXrDiscovery {
 
 fn create_instance() -> Result<Instance, String> {
     let entry = Entry::load().map_err(|e| format!("{:?}", e))?;
-
     let app_info = ApplicationInfo {
         application_name: "webvr",
+        application_version: 1,
+
         ..Default::default()
     };
 
@@ -80,7 +81,6 @@ impl Discovery for OpenXrDiscovery {
         xr: SessionBuilder,
     ) -> Result<WebXrSession, Error> {
         let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
-
         if self.supports_session(mode) {
             let gl = self.gl.clone();
             xr.run_on_main_thread(move || OpenXrDevice::new(gl, instance))
@@ -312,18 +312,6 @@ impl Device for OpenXrDevice {
         );
         let transform = RigidTransform3D::new(rotation, translation);
 
-        self.frame_stream
-            .begin()
-            .expect("failed to start frame stream");
-
-        self.left_image = self.left_swapchain.acquire_image().unwrap();
-        self.left_swapchain
-            .wait_image(openxr::Duration::INFINITE)
-            .unwrap();
-        self.right_image = self.right_swapchain.acquire_image().unwrap();
-        self.right_swapchain
-            .wait_image(openxr::Duration::INFINITE)
-            .unwrap();
         Frame {
             transform,
             inputs: vec![],
@@ -336,6 +324,21 @@ impl Device for OpenXrDevice {
         _size: UntypedSize2D<i32>,
         _sync: Option<GLsync>,
     ) {
+        // XXXManishearth this code should perhaps be in wait_for_animation_frame,
+        // but we then get errors that wait_image was called without a release_image()
+        self.frame_stream
+            .begin()
+            .expect("failed to start frame stream");
+
+        self.left_image = self.left_swapchain.acquire_image().unwrap();
+        self.left_swapchain
+            .wait_image(openxr::Duration::INFINITE)
+            .unwrap();
+        self.right_image = self.right_swapchain.acquire_image().unwrap();
+        self.right_swapchain
+            .wait_image(openxr::Duration::INFINITE)
+            .unwrap();
+
         let _left_image = self.left_swapchain.enumerate_images().unwrap()[self.left_image as usize];
         let _right_image =
             self.right_swapchain.enumerate_images().unwrap()[self.right_image as usize];
@@ -378,46 +381,6 @@ impl Device for OpenXrDevice {
                     ])],
             )
             .unwrap();
-
-        // let width = size.width as GLsizei;
-        // let height = size.height as GLsizei;
-
-        // self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
-        // self.gl.clear(gl::COLOR_BUFFER_BIT);
-        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        // if let Some(sync) = sync {
-        //     self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-        //     debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-        // }
-
-        // self.gl
-        //     .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
-        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        // self.gl.framebuffer_texture_2d(
-        //     gl::READ_FRAMEBUFFER,
-        //     gl::COLOR_ATTACHMENT0,
-        //     gl::TEXTURE_2D,
-        //     texture_id,
-        //     0,
-        // );
-        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        // self.gl.viewport(0, 0, width, height);
-        // self.gl.blit_framebuffer(
-        //     0,
-        //     0,
-        //     width,
-        //     height,
-        //     0,
-        //     0,
-        //     inner_size.width,
-        //     inner_size.height,
-        //     gl::COLOR_BUFFER_BIT,
-        //     gl::NEAREST,
-        // );
-        // debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
