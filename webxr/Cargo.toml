@@ -15,15 +15,19 @@ vendor-specific APIs like OpenVR, Oculus, GoogleVR and Magic Leap. The
 API is inspired by the WebXR Device API (https://www.w3.org/TR/webxr/)
 but adapted to Rust design patterns.'''
 
+build = "build.rs"
+
 [lib]
 path = "lib.rs"
 
 [features]
+egl = []
+gles = []
 glwindow = ["glutin"]
 headless = []
 ipc = ["webxr-api/ipc"]
-googlevr = ["gvr-sys", "android_injected_glue"]
-
+googlevr = ["gvr-sys", "android_injected_glue", "gles"]
+magicleap = ["egl"]
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }
@@ -38,3 +42,4 @@ android_injected_glue = { version = "0.2.2", optional = true }
 
 [build-dependencies]
 gl_generator = "0.11"
+bindgen = "0.49.0"

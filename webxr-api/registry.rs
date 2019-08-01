@@ -15,6 +15,8 @@ use crate::SessionBuilder;
 use crate::SessionMode;
 use crate::WebGLExternalImageApi;
 
+use log::warn;
+
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
 
@@ -185,9 +187,12 @@ impl MainThreadRegistry {
     fn request_session(&mut self, mode: SessionMode) -> Result<Session, Error> {
         let webgl = self.webgl.as_ref().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
-            let xr = SessionBuilder::new(&**webgl, &mut self.sessions);
-            if let Ok(session) = discovery.request_session(mode, xr) {
-                return Ok(session);
+            if discovery.supports_session(mode) {
+                let xr = SessionBuilder::new(&**webgl, &mut self.sessions);
+                match discovery.request_session(mode, xr) {
+                    Ok(session) => return Ok(session),
+                    Err(err) => warn!("XR device error {:?}", err),
+                }
             }
         }
         Err(Error::NoMatchingDevice)
