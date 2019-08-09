@@ -238,7 +238,6 @@ impl OpenXrDevice {
             .ok_or(Error::BackendSpecific(
                 "No available swapchain formats".into(),
             ))?;
-
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
@@ -259,7 +258,7 @@ impl OpenXrDevice {
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, device);
+        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, device, format);
 
         Ok(OpenXrDevice {
             events: Default::default(),
@@ -349,18 +348,21 @@ impl Device for OpenXrDevice {
             .wait_image(openxr::Duration::INFINITE)
             .unwrap();
 
-        let left_image = self.left_swapchain.enumerate_images().unwrap()[self.left_image as usize];
-        let right_image =
-            self.right_swapchain.enumerate_images().unwrap()[self.right_image as usize];
+        let left_swapchain_images = self.left_swapchain.enumerate_images().unwrap();
+        let left_image = left_swapchain_images[self.left_image as usize];
+        let right_swapchain_images =
+            self.right_swapchain.enumerate_images().unwrap();
+        let right_image = right_swapchain_images[self.right_image as usize];
 
         let texture_resource = self.texture.clone().up::<d3d11::ID3D11Resource>();
+        
         let left_box = d3d11::D3D11_BOX {
             left: 0,
             top: 0,
             front: 0,
             right: self.left_extent.width as u32,
             bottom: self.left_extent.height as u32,
-            back: 0,
+            back: 1,
         };
         let right_box = d3d11::D3D11_BOX {
             left: self.left_extent.width as u32,
@@ -368,7 +370,7 @@ impl Device for OpenXrDevice {
             front: 0,
             right: self.left_extent.width as u32 + self.right_extent.width as u32,
             bottom: self.right_extent.height as u32,
-            back: 0,
+            back: 1,
         };
         unsafe {
             let left_resource = ComPtr::from_raw(left_image).up::<d3d11::ID3D11Resource>();
@@ -379,7 +381,6 @@ impl Device for OpenXrDevice {
 
         self.left_swapchain.release_image().unwrap();
         self.right_swapchain.release_image().unwrap();
-
         self.frame_stream
             .end(
                 self.frame_state.predicted_display_time,
@@ -498,7 +499,7 @@ fn init_device_for_adapter(
             adapter.as_raw(),
             D3D_DRIVER_TYPE_UNKNOWN,
             ptr::null_mut(),
-            d3d11::D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            d3d11::D3D11_CREATE_DEVICE_BGRA_SUPPORT | d3d11::D3D11_CREATE_DEVICE_DEBUG,
             feature_levels.as_ptr(),
             feature_levels.len() as u32,
             d3d11::D3D11_SDK_VERSION,
@@ -517,13 +518,14 @@ fn create_texture(
     left_view_configuration: &ViewConfigurationView,
     right_view_configuration: &ViewConfigurationView,
     device: ComPtr<ID3D11Device>,
+    format: dxgiformat::DXGI_FORMAT,
 ) -> (ComPtr<d3d11::ID3D11Texture2D>, ComPtr<dxgi::IDXGIResource>) {
     let width = left_view_configuration.recommended_image_rect_width + right_view_configuration.recommended_image_rect_width;
     let height = left_view_configuration.recommended_image_rect_height + right_view_configuration.recommended_image_rect_height;
     let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
         Width: width,
         Height: height,
-        Format: dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
+        Format: format,
         MipLevels: 1,
         ArraySize: 1,
         SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
@@ -536,6 +538,8 @@ fn create_texture(
         MiscFlags: d3d11::D3D11_RESOURCE_MISC_SHARED,
     };
     let mut d3dtex_ptr = ptr::null_mut();
+    // XXXManishearth we should be able to handle other formats
+    assert_eq!(format, dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM);
     let mut data = vec![0u8; width as usize * height as usize * mem::size_of::<u32>()];
     for pixels in data.chunks_mut(mem::size_of::<u32>()) {
         pixels[0] = 255;
