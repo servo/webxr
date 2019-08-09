@@ -14,6 +14,8 @@ script:
   - cargo build --features=ipc,glwindow,headless,googlevr
   - rustup target add arm-linux-androideabi
   - cargo build --target arm-linux-androideabi --features=ipc,googlevr
+  - rustup target add aarch64-pc-windows-msvc
+  - cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
 
 notifications:
   webhooks: http://build.servo.org:54856/travis

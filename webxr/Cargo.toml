@@ -28,6 +28,7 @@ headless = []
 ipc = ["webxr-api/ipc"]
 googlevr = ["gvr-sys", "android_injected_glue", "gles"]
 magicleap = ["egl"]
+openxr-api = ["openxr", "winapi", "wio"]
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }
@@ -36,6 +37,11 @@ gleam = "0.6"
 glutin = { version = "0.21", optional = true }
 log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
+openxr = { version = "0.8", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["dxgi", "d3d11", "winerror"], optional = true }
+wio = { version = "0.2", optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_injected_glue = { version = "0.2.2", optional = true }

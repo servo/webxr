@@ -73,6 +73,16 @@ pub struct View<Eye> {
     pub viewport: Rect<i32, Viewport>,
 }
 
+impl<Eye> Default for View<Eye> {
+    fn default() -> Self {
+        View {
+            transform: RigidTransform3D::identity(),
+            projection: Transform3D::identity(),
+            viewport: Default::default(),
+        }
+    }
+}
+
 /// Whether a device is mono or stereo, and the views it supports.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]

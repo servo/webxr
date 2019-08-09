@@ -86,14 +86,6 @@ pub(crate) struct GoogleVRDevice {
     frame_bound: bool,
 }
 
-fn empty_view<T>() -> View<T> {
-    View {
-        transform: RigidTransform3D::identity(),
-        projection: Transform3D::identity(),
-        viewport: Default::default(),
-    }
-}
-
 impl GoogleVRDevice {
     #[cfg(target_os = "android")]
     pub fn new(
@@ -107,8 +99,8 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
-            left_view: empty_view(),
-            right_view: empty_view(),
+            left_view: Default::default(),
+            right_view: Default::default(),
             // https://github.com/servo/webxr/issues/32
             near: 0.1,
             far: 1000.0,
@@ -153,8 +145,8 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
-            left_view: empty_view(),
-            right_view: empty_view(),
+            left_view: Default::default(),
+            right_view: Default::default(),
             // https://github.com/servo/webxr/issues/32
             near: 0.1,
             far: 1000.0,
