@@ -13,7 +13,7 @@ use openxr::{
     self, ApplicationInfo, CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet,
     Extent2Di, FormFactor, Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef,
     Quaternionf, ReferenceSpaceType, Session, Space, Swapchain, SwapchainCreateFlags,
-    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
+    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType, ViewConfigurationView,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -37,6 +37,8 @@ use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
 use winapi::shared::dxgi;
+use winapi::shared::dxgiformat;
+use winapi::shared::dxgitype;
 use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
 use winapi::um::d3d11;
 use winapi::um::d3dcommon::*;
@@ -114,6 +116,9 @@ struct OpenXrDevice {
     left_image: u32,
     right_swapchain: Swapchain<D3D11>,
     right_image: u32,
+    texture: ComPtr<d3d11::ID3D11Texture2D>,
+    resource: ComPtr<dxgi::IDXGIResource>,
+    device_context: ComPtr<d3d11::ID3D11DeviceContext>,
 }
 
 impl OpenXrDevice {
@@ -129,7 +134,7 @@ impl OpenXrDevice {
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
         let adapter = get_matching_adapter(&requirements).map_err(|e| Error::BackendSpecific(e))?;
         let feature_levels = select_feature_levels(&requirements);
-        let (device, _device_context) = init_device_for_adapter(adapter, &feature_levels)
+        let (device, device_context) = init_device_for_adapter(adapter, &feature_levels)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
         let (session, mut frame_waiter, frame_stream) = unsafe {
@@ -254,6 +259,8 @@ impl OpenXrDevice {
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
+        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, device);
+
         Ok(OpenXrDevice {
             events: Default::default(),
             gl,
@@ -272,6 +279,9 @@ impl OpenXrDevice {
             right_view,
             left_swapchain,
             right_swapchain,
+            texture,
+            resource,
+            device_context,
         })
     }
 }
@@ -339,10 +349,34 @@ impl Device for OpenXrDevice {
             .wait_image(openxr::Duration::INFINITE)
             .unwrap();
 
-        let _left_image = self.left_swapchain.enumerate_images().unwrap()[self.left_image as usize];
-        let _right_image =
+        let left_image = self.left_swapchain.enumerate_images().unwrap()[self.left_image as usize];
+        let right_image =
             self.right_swapchain.enumerate_images().unwrap()[self.right_image as usize];
-        // TODO blit to left and right swapchain image
+
+        let texture_resource = self.texture.clone().up::<d3d11::ID3D11Resource>();
+        let left_box = d3d11::D3D11_BOX {
+            left: 0,
+            top: 0,
+            front: 0,
+            right: self.left_extent.width as u32,
+            bottom: self.left_extent.height as u32,
+            back: 0,
+        };
+        let right_box = d3d11::D3D11_BOX {
+            left: self.left_extent.width as u32,
+            top: 0,
+            front: 0,
+            right: self.left_extent.width as u32 + self.right_extent.width as u32,
+            bottom: self.right_extent.height as u32,
+            back: 0,
+        };
+        unsafe {
+            let left_resource = ComPtr::from_raw(left_image).up::<d3d11::ID3D11Resource>();
+            let right_resource = ComPtr::from_raw(right_image).up::<d3d11::ID3D11Resource>();
+            self.device_context.CopySubresourceRegion(left_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &left_box);
+            self.device_context.CopySubresourceRegion(right_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &right_box);
+        }
+
         self.left_swapchain.release_image().unwrap();
         self.right_swapchain.release_image().unwrap();
 
@@ -476,6 +510,50 @@ fn init_device_for_adapter(
         let device = ComPtr::from_raw(device_ptr);
         let device_context = ComPtr::from_raw(device_context_ptr);
         Ok((device, device_context))
+    }
+}
+
+fn create_texture(
+    left_view_configuration: &ViewConfigurationView,
+    right_view_configuration: &ViewConfigurationView,
+    device: ComPtr<ID3D11Device>,
+) -> (ComPtr<d3d11::ID3D11Texture2D>, ComPtr<dxgi::IDXGIResource>) {
+    let width = left_view_configuration.recommended_image_rect_width + right_view_configuration.recommended_image_rect_width;
+    let height = left_view_configuration.recommended_image_rect_height + right_view_configuration.recommended_image_rect_height;
+    let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
+        Width: width,
+        Height: height,
+        Format: dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
+        MipLevels: 1,
+        ArraySize: 1,
+        SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: d3d11::D3D11_USAGE_DEFAULT,
+        BindFlags: d3d11::D3D11_BIND_RENDER_TARGET | d3d11::D3D11_BIND_SHADER_RESOURCE,
+        CPUAccessFlags: 0,
+        MiscFlags: d3d11::D3D11_RESOURCE_MISC_SHARED,
+    };
+    let mut d3dtex_ptr = ptr::null_mut();
+    let mut data = vec![0u8; width as usize * height as usize * mem::size_of::<u32>()];
+    for pixels in data.chunks_mut(mem::size_of::<u32>()) {
+        pixels[0] = 255;
+        pixels[3] = 255;
+    }
+    
+    let init_data = d3d11::D3D11_SUBRESOURCE_DATA {
+        pSysMem: data.as_ptr() as *const _,
+        SysMemPitch: width * mem::size_of::<u32>() as u32,
+        SysMemSlicePitch: width * height * mem::size_of::<u32>() as u32,
+    };
+    
+    unsafe {
+        let hr = device.CreateTexture2D(&texture_desc, &init_data, &mut d3dtex_ptr);
+        assert_eq!(hr, S_OK);
+        let d3dtex = ComPtr::from_raw(d3dtex_ptr);
+        let dxgi_resource = d3dtex.cast::<dxgi::IDXGIResource>().expect("not a dxgi resource");
+        (d3dtex, dxgi_resource)
     }
 }
 
