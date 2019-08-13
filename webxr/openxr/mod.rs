@@ -331,7 +331,7 @@ impl Device for OpenXrDevice {
         &mut self,
         _texture_id: u32,
         _size: UntypedSize2D<i32>,
-        _sync: Option<GLsync>,
+        sync: Option<GLsync>,
     ) {
         // XXXManishearth this code should perhaps be in wait_for_animation_frame,
         // but we then get errors that wait_image was called without a release_image()
@@ -350,12 +350,10 @@ impl Device for OpenXrDevice {
 
         let left_swapchain_images = self.left_swapchain.enumerate_images().unwrap();
         let left_image = left_swapchain_images[self.left_image as usize];
-        let right_swapchain_images =
-            self.right_swapchain.enumerate_images().unwrap();
+        let right_swapchain_images = self.right_swapchain.enumerate_images().unwrap();
         let right_image = right_swapchain_images[self.right_image as usize];
 
         let texture_resource = self.texture.clone().up::<d3d11::ID3D11Resource>();
-        
         let left_box = d3d11::D3D11_BOX {
             left: 0,
             top: 0,
@@ -373,8 +371,13 @@ impl Device for OpenXrDevice {
             back: 1,
         };
         unsafe {
+            // from_raw adopts instead of retaining, so we need to manually addref
+            // alternatively we can just forget after the CopySubresourceRegion call,
+            // since these images are guaranteed to live at least as long as the frame
             let left_resource = ComPtr::from_raw(left_image).up::<d3d11::ID3D11Resource>();
+            mem::forget(left_resource.clone());
             let right_resource = ComPtr::from_raw(right_image).up::<d3d11::ID3D11Resource>();
+            mem::forget(right_resource.clone());
             self.device_context.CopySubresourceRegion(left_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &left_box);
             self.device_context.CopySubresourceRegion(right_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &right_box);
         }
@@ -416,6 +419,9 @@ impl Device for OpenXrDevice {
                     ])],
             )
             .unwrap();
+        if let Some(sync) = sync {
+            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+        }
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
