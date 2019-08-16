@@ -10,11 +10,11 @@ use gleam::gl::{self, GLsync, GLuint, Gl};
 use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
-    self, ApplicationInfo, CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet,
-    Extent2Di, FormFactor, Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef,
-    Quaternionf, ReferenceSpaceType, Session, Space, Swapchain, SwapchainCreateFlags,
-    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
-    ViewConfigurationView,
+    self, ApplicationInfo, CompositionLayerFlags, CompositionLayerProjection, Entry,
+    EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor, Fovf, FrameState, FrameStream,
+    FrameWaiter, Graphics, Instance, Posef, Quaternionf, ReferenceSpaceType, Session, Space,
+    Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags, Vector3f,
+    ViewConfigurationType, ViewConfigurationView,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -472,6 +472,7 @@ impl Device for OpenXrDevice {
                 EnvironmentBlendMode::ADDITIVE,
                 &[&CompositionLayerProjection::new()
                     .space(&self.space)
+                    .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
                     .views(&[
                         openxr::CompositionLayerProjectionView::new()
                             .pose(self.openxr_views[0].pose)
