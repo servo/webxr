@@ -119,6 +119,7 @@ struct OpenXrDevice {
     texture: ComPtr<d3d11::ID3D11Texture2D>,
     resource: ComPtr<dxgi::IDXGIResource>,
     device_context: ComPtr<d3d11::ID3D11DeviceContext>,
+    device: ComPtr<d3d11::ID3D11Device>,
 }
 
 impl OpenXrDevice {
@@ -258,7 +259,8 @@ impl OpenXrDevice {
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, device, format);
+        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, &device, format);
+
 
         Ok(OpenXrDevice {
             events: Default::default(),
@@ -281,6 +283,7 @@ impl OpenXrDevice {
             texture,
             resource,
             device_context,
+            device
         })
     }
 }
@@ -329,10 +332,48 @@ impl Device for OpenXrDevice {
 
     fn render_animation_frame(
         &mut self,
-        _texture_id: u32,
-        _size: UntypedSize2D<i32>,
+        texture_id: u32,
+        size: UntypedSize2D<i32>,
         sync: Option<GLsync>,
     ) {
+        let fb = self.read_fbo;
+        self.gl.bind_framebuffer(gl::FRAMEBUFFER, fb);
+        self.gl.bind_texture(gl::TEXTURE_2D, texture_id);
+
+        self.gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture_id, 0);
+        let left_data = self.gl.read_pixels(0, 0, size.width  / 2, size.height, gl::RGBA, gl::UNSIGNED_BYTE);
+        let right_data = self.gl.read_pixels(size.width / 2, 0, size.width / 2, size.height, gl::RGBA, gl::UNSIGNED_BYTE);
+        self.gl.bind_framebuffer(gl::FRAMEBUFFER, 0);
+        let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
+            Width: (size.width / 2) as u32,
+            Height: size.height as u32,
+            Format: dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            MipLevels: 1,
+            ArraySize: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: d3d11::D3D11_USAGE_DEFAULT,
+            BindFlags: d3d11::D3D11_BIND_RENDER_TARGET | d3d11::D3D11_BIND_SHADER_RESOURCE,
+            CPUAccessFlags: 0,
+            MiscFlags: d3d11::D3D11_RESOURCE_MISC_SHARED,
+        };
+        let mut init = d3d11::D3D11_SUBRESOURCE_DATA {
+            pSysMem: left_data.as_ptr() as *const _,
+            SysMemPitch: ((size.width / 2) * mem::size_of::<u32>() as i32) as u32,
+            SysMemSlicePitch: ((size.width / 2) * size.height * mem::size_of::<u32>() as i32) as u32,
+        };
+        let mut d3dtex_ptr = ptr::null_mut();
+        let (left, right) = unsafe {
+            self.device.CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
+            let left = ComPtr::from_raw(d3dtex_ptr);    
+            init.pSysMem = right_data.as_ptr() as *const _;     
+            self.device.CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
+            let right = ComPtr::from_raw(d3dtex_ptr);
+            (left.up::<d3d11::ID3D11Resource>(), right.up::<d3d11::ID3D11Resource>())
+        };
+
         // XXXManishearth this code should perhaps be in wait_for_animation_frame,
         // but we then get errors that wait_image was called without a release_image()
         self.frame_stream
@@ -354,20 +395,12 @@ impl Device for OpenXrDevice {
         let right_image = right_swapchain_images[self.right_image as usize];
 
         let texture_resource = self.texture.clone().up::<d3d11::ID3D11Resource>();
-        let left_box = d3d11::D3D11_BOX {
+        let b = d3d11::D3D11_BOX {
             left: 0,
             top: 0,
             front: 0,
-            right: self.left_extent.width as u32,
-            bottom: self.left_extent.height as u32,
-            back: 1,
-        };
-        let right_box = d3d11::D3D11_BOX {
-            left: self.left_extent.width as u32,
-            top: 0,
-            front: 0,
-            right: self.left_extent.width as u32 + self.right_extent.width as u32,
-            bottom: self.right_extent.height as u32,
+            right: (size.width / 2) as u32,
+            bottom: size.height as u32,
             back: 1,
         };
         unsafe {
@@ -378,8 +411,8 @@ impl Device for OpenXrDevice {
             mem::forget(left_resource.clone());
             let right_resource = ComPtr::from_raw(right_image).up::<d3d11::ID3D11Resource>();
             mem::forget(right_resource.clone());
-            self.device_context.CopySubresourceRegion(left_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &left_box);
-            self.device_context.CopySubresourceRegion(right_resource.as_raw(), 0, 0, 0, 0, texture_resource.as_raw(), 0, &right_box);
+            self.device_context.CopySubresourceRegion(left_resource.as_raw(), 0, 0, 0, 0, left.as_raw(), 0, &b);
+            self.device_context.CopySubresourceRegion(right_resource.as_raw(), 0, 0, 0, 0, right.as_raw(), 0, &b);
         }
 
         self.left_swapchain.release_image().unwrap();
@@ -523,7 +556,7 @@ fn init_device_for_adapter(
 fn create_texture(
     left_view_configuration: &ViewConfigurationView,
     right_view_configuration: &ViewConfigurationView,
-    device: ComPtr<ID3D11Device>,
+    device: &ComPtr<ID3D11Device>,
     format: dxgiformat::DXGI_FORMAT,
 ) -> (ComPtr<d3d11::ID3D11Texture2D>, ComPtr<dxgi::IDXGIResource>) {
     let width = left_view_configuration.recommended_image_rect_width + right_view_configuration.recommended_image_rect_width;
@@ -593,9 +626,20 @@ fn lerp_transforms(left: &Posef, right: &Posef) -> RigidTransform3D<f32, Viewer,
 
 #[inline]
 fn fov_to_projection_matrix<T, U>(fov: &Fovf, near: f32, far: f32) -> Transform3D<f32, T, U> {
-    let left = -fov.angle_left.tan() * near;
+    // XXXManishearth deal with infinite planes
+    let left = fov.angle_left.tan() * near;
     let right = fov.angle_right.tan() * near;
     let top = fov.angle_up.tan() * near;
-    let bottom = -fov.angle_down.tan() * near;
-    Transform3D::ortho(left, right, bottom, top, near, far)
+    let bottom = fov.angle_down.tan() * near;
+
+    let w = right - left;
+    let h = top - bottom;
+    let d = far - near;
+
+    Transform3D::column_major(
+        2. * near / w, 0.           , (right + left) / w , 0.                  ,
+        0.           , 2. * near / h, (top + bottom) / h , 0.                  ,
+        0.           , 0.           , - (far + near) / d , -2. * far * near / d,
+        0.           , 0.           , -1.                , 0.
+    )
 }
