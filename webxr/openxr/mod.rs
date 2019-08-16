@@ -339,6 +339,9 @@ impl Device for OpenXrDevice {
             }
             flipped
         }
+        if let Some(sync) = sync {
+            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+        }
         let fb = self.read_fbo;
         self.gl.bind_framebuffer(gl::FRAMEBUFFER, fb);
         self.gl.bind_texture(gl::TEXTURE_2D, texture_id);
@@ -502,9 +505,6 @@ impl Device for OpenXrDevice {
                     ])],
             )
             .unwrap();
-        if let Some(sync) = sync {
-            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-        }
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -588,7 +588,8 @@ fn init_device_for_adapter(
             adapter.as_raw(),
             D3D_DRIVER_TYPE_UNKNOWN,
             ptr::null_mut(),
-            d3d11::D3D11_CREATE_DEVICE_BGRA_SUPPORT | d3d11::D3D11_CREATE_DEVICE_DEBUG,
+            // add d3d11::D3D11_CREATE_DEVICE_DEBUG below for debug output
+            d3d11::D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             feature_levels.as_ptr(),
             feature_levels.len() as u32,
             d3d11::D3D11_SDK_VERSION,
