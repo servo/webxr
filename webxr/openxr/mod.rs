@@ -13,7 +13,8 @@ use openxr::{
     self, ApplicationInfo, CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet,
     Extent2Di, FormFactor, Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef,
     Quaternionf, ReferenceSpaceType, Session, Space, Swapchain, SwapchainCreateFlags,
-    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType, ViewConfigurationView,
+    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
+    ViewConfigurationView,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -259,8 +260,12 @@ impl OpenXrDevice {
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let (texture, resource) = create_texture(&left_view_configuration, &right_view_configuration, &device, format);
-
+        let (texture, resource) = create_texture(
+            &left_view_configuration,
+            &right_view_configuration,
+            &device,
+            format,
+        );
 
         Ok(OpenXrDevice {
             events: Default::default(),
@@ -283,7 +288,7 @@ impl OpenXrDevice {
             texture,
             resource,
             device_context,
-            device
+            device,
         })
     }
 }
@@ -310,19 +315,8 @@ impl Device for OpenXrDevice {
             )
             .expect("error locating views");
         self.openxr_views = views;
-        let view = self.openxr_views[0];
-        let rotation = Rotation3D::unit_quaternion(
-            view.pose.orientation.x,
-            view.pose.orientation.y,
-            view.pose.orientation.z,
-            view.pose.orientation.w,
-        );
-        let translation = Vector3D::new(
-            view.pose.position.x,
-            view.pose.position.y,
-            view.pose.position.z,
-        );
-        let transform = RigidTransform3D::new(rotation, translation);
+
+        let transform = lerp_transforms(&self.openxr_views[0].pose, &self.openxr_views[1].pose);
 
         Frame {
             transform,
@@ -336,13 +330,44 @@ impl Device for OpenXrDevice {
         size: UntypedSize2D<i32>,
         sync: Option<GLsync>,
     ) {
+        fn flip_vec(v: &[u8], width: usize, height: usize) -> Vec<u8> {
+            let mut flipped = Vec::with_capacity(v.len());
+            let stride = width * 4;
+            for y in 0..height {
+                let start = (height - y - 1) * stride;
+                flipped.extend_from_slice(&v[start..start + stride]);
+            }
+            flipped
+        }
         let fb = self.read_fbo;
         self.gl.bind_framebuffer(gl::FRAMEBUFFER, fb);
         self.gl.bind_texture(gl::TEXTURE_2D, texture_id);
 
-        self.gl.framebuffer_texture_2d(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture_id, 0);
-        let left_data = self.gl.read_pixels(0, 0, size.width  / 2, size.height, gl::RGBA, gl::UNSIGNED_BYTE);
-        let right_data = self.gl.read_pixels(size.width / 2, 0, size.width / 2, size.height, gl::RGBA, gl::UNSIGNED_BYTE);
+        self.gl.framebuffer_texture_2d(
+            gl::FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            gl::TEXTURE_2D,
+            texture_id,
+            0,
+        );
+        let left_data = self.gl.read_pixels(
+            0,
+            0,
+            size.width / 2,
+            size.height,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+        );
+        let right_data = self.gl.read_pixels(
+            size.width / 2,
+            0,
+            size.width / 2,
+            size.height,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+        );
+        let left_data = flip_vec(&left_data, size.width as usize / 2, size.height as usize);
+        let right_data = flip_vec(&right_data, size.width as usize / 2, size.height as usize);
         self.gl.bind_framebuffer(gl::FRAMEBUFFER, 0);
         let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
             Width: (size.width / 2) as u32,
@@ -362,16 +387,22 @@ impl Device for OpenXrDevice {
         let mut init = d3d11::D3D11_SUBRESOURCE_DATA {
             pSysMem: left_data.as_ptr() as *const _,
             SysMemPitch: ((size.width / 2) * mem::size_of::<u32>() as i32) as u32,
-            SysMemSlicePitch: ((size.width / 2) * size.height * mem::size_of::<u32>() as i32) as u32,
+            SysMemSlicePitch: ((size.width / 2) * size.height * mem::size_of::<u32>() as i32)
+                as u32,
         };
         let mut d3dtex_ptr = ptr::null_mut();
         let (left, right) = unsafe {
-            self.device.CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
-            let left = ComPtr::from_raw(d3dtex_ptr);    
-            init.pSysMem = right_data.as_ptr() as *const _;     
-            self.device.CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
+            self.device
+                .CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
+            let left = ComPtr::from_raw(d3dtex_ptr);
+            init.pSysMem = right_data.as_ptr() as *const _;
+            self.device
+                .CreateTexture2D(&texture_desc, &init, &mut d3dtex_ptr);
             let right = ComPtr::from_raw(d3dtex_ptr);
-            (left.up::<d3d11::ID3D11Resource>(), right.up::<d3d11::ID3D11Resource>())
+            (
+                left.up::<d3d11::ID3D11Resource>(),
+                right.up::<d3d11::ID3D11Resource>(),
+            )
         };
 
         // XXXManishearth this code should perhaps be in wait_for_animation_frame,
@@ -411,8 +442,26 @@ impl Device for OpenXrDevice {
             mem::forget(left_resource.clone());
             let right_resource = ComPtr::from_raw(right_image).up::<d3d11::ID3D11Resource>();
             mem::forget(right_resource.clone());
-            self.device_context.CopySubresourceRegion(left_resource.as_raw(), 0, 0, 0, 0, left.as_raw(), 0, &b);
-            self.device_context.CopySubresourceRegion(right_resource.as_raw(), 0, 0, 0, 0, right.as_raw(), 0, &b);
+            self.device_context.CopySubresourceRegion(
+                left_resource.as_raw(),
+                0,
+                0,
+                0,
+                0,
+                left.as_raw(),
+                0,
+                &b,
+            );
+            self.device_context.CopySubresourceRegion(
+                right_resource.as_raw(),
+                0,
+                0,
+                0,
+                0,
+                right.as_raw(),
+                0,
+                &b,
+            );
         }
 
         self.left_swapchain.release_image().unwrap();
@@ -559,8 +608,10 @@ fn create_texture(
     device: &ComPtr<ID3D11Device>,
     format: dxgiformat::DXGI_FORMAT,
 ) -> (ComPtr<d3d11::ID3D11Texture2D>, ComPtr<dxgi::IDXGIResource>) {
-    let width = left_view_configuration.recommended_image_rect_width + right_view_configuration.recommended_image_rect_width;
-    let height = left_view_configuration.recommended_image_rect_height + right_view_configuration.recommended_image_rect_height;
+    let width = left_view_configuration.recommended_image_rect_width
+        + right_view_configuration.recommended_image_rect_width;
+    let height = left_view_configuration.recommended_image_rect_height
+        + right_view_configuration.recommended_image_rect_height;
     let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
         Width: width,
         Height: height,
@@ -584,18 +635,20 @@ fn create_texture(
         pixels[0] = 255;
         pixels[3] = 255;
     }
-    
+
     let init_data = d3d11::D3D11_SUBRESOURCE_DATA {
         pSysMem: data.as_ptr() as *const _,
         SysMemPitch: width * mem::size_of::<u32>() as u32,
         SysMemSlicePitch: width * height * mem::size_of::<u32>() as u32,
     };
-    
+
     unsafe {
         let hr = device.CreateTexture2D(&texture_desc, &init_data, &mut d3dtex_ptr);
         assert_eq!(hr, S_OK);
         let d3dtex = ComPtr::from_raw(d3dtex_ptr);
-        let dxgi_resource = d3dtex.cast::<dxgi::IDXGIResource>().expect("not a dxgi resource");
+        let dxgi_resource = d3dtex
+            .cast::<dxgi::IDXGIResource>()
+            .expect("not a dxgi resource");
         (d3dtex, dxgi_resource)
     }
 }
@@ -637,9 +690,21 @@ fn fov_to_projection_matrix<T, U>(fov: &Fovf, near: f32, far: f32) -> Transform3
     let d = far - near;
 
     Transform3D::column_major(
-        2. * near / w, 0.           , (right + left) / w , 0.                  ,
-        0.           , 2. * near / h, (top + bottom) / h , 0.                  ,
-        0.           , 0.           , - (far + near) / d , -2. * far * near / d,
-        0.           , 0.           , -1.                , 0.
+        2. * near / w,
+        0.,
+        (right + left) / w,
+        0.,
+        0.,
+        2. * near / h,
+        (top + bottom) / h,
+        0.,
+        0.,
+        0.,
+        -(far + near) / d,
+        -2. * far * near / d,
+        0.,
+        0.,
+        -1.,
+        0.,
     )
 }
