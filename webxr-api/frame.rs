@@ -5,6 +5,7 @@
 use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
+use crate::Views;
 
 use euclid::RigidTransform3D;
 
@@ -22,4 +23,13 @@ pub struct Frame {
 
     /// Frame information for each connected input source
     pub inputs: Vec<InputFrame>,
+
+    /// Events that occur with the frame.
+    pub events: Vec<FrameUpdateEvent>,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum FrameUpdateEvent {
+    UpdateViews(Views),
 }

@@ -10,13 +10,12 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::FrameUpdateEvent;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
-use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
-use webxr_api::RightEye;
 use webxr_api::Sender;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
@@ -24,6 +23,7 @@ use webxr_api::Viewer;
 use webxr_api::Views;
 
 use crate::gles as gl;
+use crate::utils::ClipPlanes;
 
 use euclid::default::Size2D as DefaultSize2D;
 use euclid::Point2D;
@@ -61,10 +61,7 @@ pub(crate) struct GoogleVRDevice {
     multiview: bool,
     multisampling: bool,
     depth: bool,
-    left_view: View<LeftEye>,
-    right_view: View<RightEye>,
-    near: f32,
-    far: f32,
+    clip_planes: ClipPlanes,
     input: Option<GoogleVRController>,
 
     #[cfg(target_os = "android")]
@@ -99,11 +96,7 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
-            left_view: Default::default(),
-            right_view: Default::default(),
-            // https://github.com/servo/webxr/issues/32
-            near: 0.1,
-            far: 1000.0,
+            clip_planes: Default::default(),
             input: None,
 
             ctx: ctx.get(),
@@ -131,7 +124,6 @@ impl GoogleVRDevice {
         // XXXManishearth figure out how to block until presentation
         // starts
         device.start_present();
-        device.initialize_views();
         Ok(device)
     }
 
@@ -145,11 +137,7 @@ impl GoogleVRDevice {
             multiview: false,
             multisampling: false,
             depth: false,
-            left_view: Default::default(),
-            right_view: Default::default(),
-            // https://github.com/servo/webxr/issues/32
-            near: 0.1,
-            far: 1000.0,
+            clip_planes: Default::default(),
             input: None,
 
             ctx: ctx.get(),
@@ -175,7 +163,6 @@ impl GoogleVRDevice {
         // XXXManishearth figure out how to block until presentation
         // starts
         device.start_present();
-        device.initialize_views();
         Ok(device)
     }
 
@@ -338,16 +325,9 @@ impl GoogleVRDevice {
         self.presenting = false;
     }
 
-    fn initialize_views(&mut self) {
-        unsafe {
-            self.left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
-            self.right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
-        }
-    }
-
     unsafe fn fetch_eye<T>(&self, eye: gvr::gvr_eye, vp: *mut gvr::gvr_buffer_viewport) -> View<T> {
         let eye_fov = gvr::gvr_buffer_viewport_get_source_fov(vp);
-        let projection = fov_to_projection_matrix(&eye_fov, self.near, self.far);
+        let projection = fov_to_projection_matrix(&eye_fov, self.clip_planes);
 
         // this matrix converts from head space to eye space,
         // i.e. it's the inverse of the offset
@@ -542,17 +522,27 @@ impl Device for GoogleVRDevice {
     }
 
     fn views(&self) -> Views {
-        Views::Stereo(self.left_view.clone(), self.right_view.clone())
+        unsafe {
+            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
+            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
+            Views::Stereo(left_view, right_view)
+        }
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
         unsafe {
             self.acquire_frame();
         }
+        let events = if self.clip_planes.recently_updated() {
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
         // Predict head matrix
         Frame {
             transform: self.fetch_head_matrix(),
             inputs: self.input_state(),
+            events,
         }
     }
 
@@ -597,14 +587,19 @@ impl Device for GoogleVRDevice {
     fn set_quitter(&mut self, _: Quitter) {
         // do nothing for now until we need the quitter
     }
+
+    fn update_clip_planes(&mut self, near: f32, far: f32) {
+        self.clip_planes.update(near, far)
+    }
 }
 
 #[inline]
 fn fov_to_projection_matrix<T, U>(
     fov: &gvr::gvr_rectf,
-    near: f32,
-    far: f32,
+    clip_planes: ClipPlanes,
 ) -> Transform3D<f32, T, U> {
+    let near = clip_planes.near;
+    let far = clip_planes.far;
     let left = -fov.left.to_radians().tan() * near;
     let right = fov.right.to_radians().tan() * near;
     let top = fov.top.to_radians().tan() * near;

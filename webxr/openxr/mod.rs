@@ -1,3 +1,4 @@
+use crate::utils::ClipPlanes;
 use euclid::default::Size2D as UntypedSize2D;
 use euclid::Point2D;
 use euclid::Rect;
@@ -25,11 +26,10 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::FrameUpdateEvent;
 use webxr_api::InputSource;
-use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
-use webxr_api::RightEye;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
 use webxr_api::SessionBuilder;
@@ -108,11 +108,11 @@ struct OpenXrDevice {
     frame_stream: FrameStream<D3D11>,
     frame_state: FrameState,
     space: Space,
+    clip_planes: ClipPlanes,
     openxr_views: Vec<openxr::View>,
+    view_configurations: Vec<openxr::ViewConfigurationView>,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
-    left_view: View<LeftEye>,
-    right_view: View<RightEye>,
     left_swapchain: Swapchain<D3D11>,
     left_image: u32,
     right_swapchain: Swapchain<D3D11>,
@@ -172,12 +172,12 @@ impl OpenXrDevice {
             .create_reference_space(ref_space_type, pose)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let view_configuration_views = instance
+        let view_configurations = instance
             .enumerate_view_configuration_views(system, ViewConfigurationType::PRIMARY_STEREO)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let left_view_configuration = view_configuration_views[0];
-        let right_view_configuration = view_configuration_views[1];
+        let left_view_configuration = view_configurations[0];
+        let right_view_configuration = view_configurations[1];
         let left_extent = Extent2Di {
             width: left_view_configuration.recommended_image_rect_width as i32,
             height: left_view_configuration.recommended_image_rect_height as i32,
@@ -186,10 +186,6 @@ impl OpenXrDevice {
             width: right_view_configuration.recommended_image_rect_width as i32,
             height: right_view_configuration.recommended_image_rect_height as i32,
         };
-
-        // https://github.com/servo/webxr/issues/32
-        let near = 0.1;
-        let far = 1000.;
 
         // Obtain view info
         let frame_state = frame_waiter.wait().expect("error waiting for frame");
@@ -200,35 +196,6 @@ impl OpenXrDevice {
                 &space,
             )
             .expect("error locating views");
-
-        let lerped = lerp_transforms(&views[0].pose, &views[1].pose);
-        let left_vp = Rect::new(
-            Point2D::zero(),
-            Size2D::new(
-                left_view_configuration.recommended_image_rect_width as i32,
-                left_view_configuration.recommended_image_rect_height as i32,
-            ),
-        );
-        let right_vp = Rect::new(
-            Point2D::new(
-                left_view_configuration.recommended_image_rect_width as i32,
-                0,
-            ),
-            Size2D::new(
-                right_view_configuration.recommended_image_rect_width as i32,
-                right_view_configuration.recommended_image_rect_height as i32,
-            ),
-        );
-        let left_view = View {
-            transform: transform(&views[0].pose).inverse().pre_transform(&lerped),
-            projection: fov_to_projection_matrix(&views[0].fov, near, far),
-            viewport: left_vp,
-        };
-        let right_view = View {
-            transform: transform(&views[1].pose).inverse().pre_transform(&lerped),
-            projection: fov_to_projection_matrix(&views[1].fov, near, far),
-            viewport: right_vp,
-        };
 
         // Create swapchains
 
@@ -276,13 +243,13 @@ impl OpenXrDevice {
             frame_waiter,
             frame_state,
             space,
+            clip_planes: Default::default(),
             left_extent,
             right_extent,
             left_image: 0,
             right_image: 0,
             openxr_views: views,
-            left_view,
-            right_view,
+            view_configurations,
             left_swapchain,
             right_swapchain,
             texture,
@@ -300,7 +267,40 @@ impl Device for OpenXrDevice {
     }
 
     fn views(&self) -> Views {
-        Views::Stereo(self.left_view.clone(), self.right_view.clone())
+        let left_view_configuration = &self.view_configurations[0];
+        let right_view_configuration = &self.view_configurations[1];
+        let views = &self.openxr_views;
+
+        let lerped = lerp_transforms(&views[0].pose, &views[1].pose);
+        let left_vp = Rect::new(
+            Point2D::zero(),
+            Size2D::new(
+                left_view_configuration.recommended_image_rect_width as i32,
+                left_view_configuration.recommended_image_rect_height as i32,
+            ),
+        );
+        let right_vp = Rect::new(
+            Point2D::new(
+                left_view_configuration.recommended_image_rect_width as i32,
+                0,
+            ),
+            Size2D::new(
+                right_view_configuration.recommended_image_rect_width as i32,
+                right_view_configuration.recommended_image_rect_height as i32,
+            ),
+        );
+        let left_view = View {
+            transform: transform(&views[0].pose).inverse().pre_transform(&lerped),
+            projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
+            viewport: left_vp,
+        };
+        let right_view = View {
+            transform: transform(&views[1].pose).inverse().pre_transform(&lerped),
+            projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
+            viewport: right_vp,
+        };
+
+        Views::Stereo(left_view, right_view)
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
@@ -318,9 +318,15 @@ impl Device for OpenXrDevice {
 
         let transform = lerp_transforms(&self.openxr_views[0].pose, &self.openxr_views[1].pose);
 
+        let events = if self.clip_planes.recently_updated() {
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
         Frame {
             transform,
             inputs: vec![],
+            events,
         }
     }
 
@@ -524,6 +530,10 @@ impl Device for OpenXrDevice {
         // XXXManishearth add something for this that listens for the window
         // being closed
     }
+
+    fn update_clip_planes(&mut self, near: f32, far: f32) {
+        self.clip_planes.update(near, far);
+    }
 }
 
 fn get_matching_adapter(
@@ -680,7 +690,9 @@ fn lerp_transforms(left: &Posef, right: &Posef) -> RigidTransform3D<f32, Viewer,
 }
 
 #[inline]
-fn fov_to_projection_matrix<T, U>(fov: &Fovf, near: f32, far: f32) -> Transform3D<f32, T, U> {
+fn fov_to_projection_matrix<T, U>(fov: &Fovf, clip_planes: ClipPlanes) -> Transform3D<f32, T, U> {
+    let near = clip_planes.near;
+    let far = clip_planes.far;
     // XXXManishearth deal with infinite planes
     let left = fov.angle_left.tan() * near;
     let right = fov.angle_right.tan() * near;

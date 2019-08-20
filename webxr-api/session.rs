@@ -7,6 +7,7 @@ use crate::Error;
 use crate::Event;
 use crate::Floor;
 use crate::Frame;
+use crate::FrameUpdateEvent;
 use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
@@ -49,6 +50,7 @@ pub type HighResTimeStamp = f64;
 enum SessionMsg {
     SetTexture(WebGLContextId, WebGLTextureId, UntypedSize2D<GLsizei>),
     SetEventDest(Sender<Event>),
+    UpdateClipPlanes(/* near */ f32, /* far */ f32),
     RequestAnimationFrame(Sender<(HighResTimeStamp, Frame)>),
     RenderAnimationFrame,
     Quit,
@@ -108,6 +110,10 @@ impl Session {
         let _ = self.sender.send(SessionMsg::RequestAnimationFrame(dest));
     }
 
+    pub fn update_clip_planes(&mut self, near: f32, far: f32) {
+        let _ = self.sender.send(SessionMsg::UpdateClipPlanes(near, far));
+    }
+
     pub fn set_event_dest(&mut self, dest: Sender<Event>) {
         let _ = self.sender.send(SessionMsg::SetEventDest(dest));
     }
@@ -118,6 +124,12 @@ impl Session {
 
     pub fn end_session(&mut self) {
         let _ = self.sender.send(SessionMsg::Quit);
+    }
+
+    pub fn apply_event(&mut self, event: FrameUpdateEvent) {
+        match event {
+            FrameUpdateEvent::UpdateViews(views) => self.views = views,
+        }
     }
 }
 
@@ -196,6 +208,7 @@ impl<D: Device> SessionThread<D> {
                 let frame = self.device.wait_for_animation_frame();
                 let _ = dest.send((timestamp, frame));
             }
+            SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
                 if let Some((ctxt, txt, size)) = self.texture {

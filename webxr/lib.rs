@@ -27,3 +27,5 @@ mod egl;
 
 #[cfg(feature = "openxr-api")]
 pub mod openxr;
+
+pub(crate) mod utils;
