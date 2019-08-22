@@ -67,6 +67,7 @@ use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::FrameUpdateEvent;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
@@ -96,6 +97,7 @@ pub struct MagicLeapDevice {
     in_frame: bool,
     frame_handle: MLHandle,
     cameras: MLGraphicsVirtualCameraInfoArray,
+    view_update_needed: bool,
 }
 
 impl MagicLeapDiscovery {
@@ -161,6 +163,7 @@ impl MagicLeapDevice {
             in_frame,
             frame_handle,
             cameras,
+            view_update_needed: false,
         };
 
         // Rather annoyingly, in order for the views to be available, we have to
@@ -384,8 +387,16 @@ impl Device for MagicLeapDevice {
 
         let transform = self.lerp_transforms();
         let inputs = Vec::new();
-
-        Frame { transform, inputs }
+        let events = if self.view_update_needed {
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
+        Frame {
+            transform,
+            inputs,
+            events,
+        }
     }
 
     fn render_animation_frame(
@@ -437,5 +448,10 @@ impl Device for MagicLeapDevice {
 
     fn set_quitter(&mut self, _quitter: Quitter) {
         // TODO: handle quit
+    }
+
+    fn update_clip_planes(&mut self, _near: f32, _far: f32) {
+        self.view_update_needed = true;
+        // XXXManishearth tell the device about the new clip planes
     }
 }

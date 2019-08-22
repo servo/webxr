@@ -25,6 +25,7 @@ pub use events::EventBuffer;
 pub use events::Visibility;
 
 pub use frame::Frame;
+pub use frame::FrameUpdateEvent;
 
 pub use input::Handedness;
 pub use input::InputFrame;

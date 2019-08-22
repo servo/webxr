@@ -73,6 +73,8 @@ pub trait Device: 'static {
     fn quit(&mut self);
 
     fn set_quitter(&mut self, quitter: Quitter);
+
+    fn update_clip_planes(&mut self, near: f32, far: f32);
 }
 
 impl Discovery for Box<dyn Discovery> {

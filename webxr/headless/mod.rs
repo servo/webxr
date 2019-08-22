@@ -9,6 +9,7 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::FrameUpdateEvent;
 use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputSource;
@@ -63,6 +64,7 @@ struct HeadlessDeviceData {
     floor_transform: RigidTransform3D<f32, Native, Floor>,
     viewer_origin: RigidTransform3D<f32, Viewer, Native>,
     views: Views,
+    needs_view_update: bool,
     inputs: Vec<InputInfo>,
     events: EventBuffer,
     quitter: Option<Quitter>,
@@ -82,6 +84,7 @@ impl MockDiscovery for HeadlessMockDiscovery {
             floor_transform,
             viewer_origin,
             views,
+            needs_view_update: false,
             inputs: vec![],
             events: Default::default(),
             quitter: None,
@@ -134,7 +137,7 @@ impl Device for HeadlessDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Frame {
-        let data = self.data.lock().unwrap();
+        let mut data = self.data.lock().unwrap();
         let transform = data.viewer_origin;
         let inputs = data
             .inputs
@@ -145,7 +148,18 @@ impl Device for HeadlessDevice {
                 target_ray_origin: i.pointer,
             })
             .collect();
-        Frame { transform, inputs }
+
+        let events = if data.needs_view_update {
+            data.needs_view_update = false;
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
+        Frame {
+            transform,
+            inputs,
+            events,
+        }
     }
 
     fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: Option<GLsync>) {
@@ -170,6 +184,11 @@ impl Device for HeadlessDevice {
     fn set_quitter(&mut self, quitter: Quitter) {
         self.data.lock().unwrap().quitter = Some(quitter);
     }
+
+    fn update_clip_planes(&mut self, _: f32, _: f32) {
+        // The views are actually set through the test API so this does nothing
+        // https://github.com/immersive-web/webxr-test-api/issues/39
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -186,6 +205,7 @@ impl HeadlessDeviceData {
             }
             MockDeviceMsg::SetViews(views) => {
                 self.views = views;
+                self.needs_view_update = true;
             }
             MockDeviceMsg::Focus => {
                 // TODO

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::utils::ClipPlanes;
 use euclid::default::Size2D as UntypedSize2D;
 use euclid::Angle;
 use euclid::Point2D;
@@ -31,6 +32,7 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
+use webxr_api::FrameUpdateEvent;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
@@ -43,8 +45,6 @@ use webxr_api::Views;
 
 const HEIGHT: f32 = 1.0;
 const EYE_DISTANCE: f32 = 0.25;
-const NEAR: f32 = 0.1;
-const FAR: f32 = 100.0;
 
 pub trait GlWindow {
     fn make_current(&mut self);
@@ -88,6 +88,7 @@ pub struct GlWindowDevice {
     window: Box<dyn GlWindow>,
     read_fbo: GLuint,
     events: EventBuffer,
+    clip_planes: ClipPlanes,
 }
 
 impl Device for GlWindowDevice {
@@ -106,9 +107,15 @@ impl Device for GlWindowDevice {
         self.window.swap_buffers();
         let translation = Vector3D::new(0.0, 0.0, -5.0);
         let transform = RigidTransform3D::from_translation(translation);
+        let events = if self.clip_planes.recently_updated() {
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
         Frame {
             transform,
             inputs: vec![],
+            events,
         }
     }
 
@@ -179,6 +186,10 @@ impl Device for GlWindowDevice {
         // XXXManishearth add something for this that listens for the window
         // being closed
     }
+
+    fn update_clip_planes(&mut self, near: f32, far: f32) {
+        self.clip_planes.update(near, far)
+    }
 }
 
 impl GlWindowDevice {
@@ -192,6 +203,7 @@ impl GlWindowDevice {
             window,
             read_fbo,
             events: Default::default(),
+            clip_planes: Default::default(),
         })
     }
 
@@ -201,7 +213,7 @@ impl GlWindowDevice {
         let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
         let viewport_origin = Point2D::new(viewport_x_origin, 0);
         let viewport = Rect::new(viewport_origin, viewport_size);
-        let projection = self.perspective(NEAR, FAR);
+        let projection = self.perspective();
         let eye_distance = if is_right {
             EYE_DISTANCE
         } else {
@@ -216,7 +228,9 @@ impl GlWindowDevice {
         }
     }
 
-    fn perspective<Eye>(&self, near: f32, far: f32) -> Transform3D<f32, Eye, Display> {
+    fn perspective<Eye>(&self) -> Transform3D<f32, Eye, Display> {
+        let near = self.clip_planes.near;
+        let far = self.clip_planes.far;
         // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
         let size = self.window.size();
         let width = size.width as f32;
