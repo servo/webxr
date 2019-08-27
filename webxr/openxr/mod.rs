@@ -93,7 +93,7 @@ impl Discovery for OpenXrDiscovery {
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        mode == SessionMode::ImmersiveAR
+        mode == SessionMode::ImmersiveAR || mode == SessionMode::ImmersiveVR
     }
 }
 
