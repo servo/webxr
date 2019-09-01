@@ -523,6 +523,7 @@ impl Device for OpenXrDevice {
 
     fn quit(&mut self) {
         self.events.callback(Event::SessionEnd);
+        self.session.request_exit();
     }
 
     fn set_quitter(&mut self, _: Quitter) {

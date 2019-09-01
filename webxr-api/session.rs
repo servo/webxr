@@ -237,7 +237,7 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
         let timestamp = self.timestamp;
         while timestamp == self.timestamp && self.running {
             if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
-                self.handle_msg(msg);
+                self.running = self.handle_msg(msg);
             } else {
                 break;
             }
