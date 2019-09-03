@@ -33,7 +33,7 @@ openxr-api = ["openxr", "winapi", "wio"]
 [dependencies]
 webxr-api = { path = "../webxr-api" }
 euclid = "0.20"
-gleam = "0.6"
+gleam = "0.7"
 glutin = { version = "0.21", optional = true }
 log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
