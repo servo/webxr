@@ -205,8 +205,12 @@ impl<D: Device> SessionThread<D> {
             }
             SessionMsg::RequestAnimationFrame(dest) => {
                 let timestamp = self.timestamp;
-                let frame = self.device.wait_for_animation_frame();
-                let _ = dest.send((timestamp, frame));
+                if self.device.is_running() {
+                    let frame = self.device.wait_for_animation_frame();
+                    let _ = dest.send((timestamp, frame));
+                } else {
+                    return false;
+                }
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
@@ -219,7 +223,6 @@ impl<D: Device> SessionThread<D> {
             }
             SessionMsg::Quit => {
                 self.device.quit();
-                return false;
             }
         }
         true

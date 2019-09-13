@@ -58,6 +58,7 @@ struct InputInfo {
 struct HeadlessDevice {
     gl: Rc<dyn Gl>,
     data: Arc<Mutex<HeadlessDeviceData>>,
+    is_running: bool,
 }
 
 struct HeadlessDeviceData {
@@ -119,7 +120,13 @@ impl Discovery for HeadlessDiscovery {
         }
         let gl = self.gl.clone();
         let data = self.data.clone();
-        xr.run_on_main_thread(move || Ok(HeadlessDevice { gl, data }))
+        xr.run_on_main_thread(move || {
+            Ok(HeadlessDevice {
+                gl,
+                data,
+                is_running: true,
+            })
+        })
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
@@ -177,7 +184,12 @@ impl Device for HeadlessDevice {
         self.data.lock().unwrap().events.upgrade(dest)
     }
 
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
+
     fn quit(&mut self) {
+        self.is_running = false;
         self.data.lock().unwrap().events.callback(Event::SessionEnd);
     }
 

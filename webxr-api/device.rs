@@ -48,6 +48,10 @@ pub trait Device: 'static {
         Size2D::new(viewport.max_x(), viewport.max_y())
     }
 
+    /// This method checks if the session has exited since last
+    /// wait_for_animation_frame call.
+    fn is_running(&self) -> bool;
+
     /// This method should block waiting for the next frame,
     /// and return the information for it.
     fn wait_for_animation_frame(&mut self) -> Frame;

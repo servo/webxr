@@ -98,6 +98,7 @@ impl Discovery for OpenXrDiscovery {
 }
 
 struct OpenXrDevice {
+    instance: Instance,
     #[allow(unused)]
     gl: Rc<dyn Gl>,
     #[allow(unused)]
@@ -121,6 +122,7 @@ struct OpenXrDevice {
     resource: ComPtr<dxgi::IDXGIResource>,
     device_context: ComPtr<d3d11::ID3D11DeviceContext>,
     device: ComPtr<d3d11::ID3D11Device>,
+    is_running: bool,
 }
 
 impl OpenXrDevice {
@@ -149,6 +151,8 @@ impl OpenXrDevice {
                 )
                 .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?
         };
+
+        // XXXPaul initialisation should happen on SessionStateChanged(Ready)?
 
         session
             .begin(ViewConfigurationType::PRIMARY_STEREO)
@@ -235,6 +239,7 @@ impl OpenXrDevice {
         );
 
         Ok(OpenXrDevice {
+            instance,
             events: Default::default(),
             gl,
             read_fbo,
@@ -256,7 +261,30 @@ impl OpenXrDevice {
             resource,
             device_context,
             device,
+            is_running: true,
         })
+    }
+
+    fn handle_openxr_events(&mut self) {
+        let mut buffer = openxr::EventDataBuffer::new();
+        while let Some(event) = self.instance.poll_event(&mut buffer).unwrap() {
+            use openxr::Event::*;
+            match event {
+                SessionStateChanged(session_change) => match session_change.state() {
+                    openxr::SessionState::STOPPING => {
+                        self.events.callback(Event::SessionEnd);
+                        self.session.end().unwrap();
+                        self.is_running = false;
+                    }
+                    _ => {
+                        // FIXME: Handle other states
+                    }
+                },
+                _ => {
+                    // FIXME: Handle other events
+                }
+            }
+        }
     }
 }
 
@@ -303,7 +331,12 @@ impl Device for OpenXrDevice {
         Views::Stereo(left_view, right_view)
     }
 
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
+
     fn wait_for_animation_frame(&mut self) -> Frame {
+        self.handle_openxr_events();
         self.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
         // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, views) = self
@@ -538,8 +571,7 @@ impl Device for OpenXrDevice {
     }
 
     fn quit(&mut self) {
-        self.events.callback(Event::SessionEnd);
-        self.session.request_exit();
+        self.session.request_exit().unwrap();
     }
 
     fn set_quitter(&mut self, _: Quitter) {
