@@ -89,6 +89,7 @@ pub struct GlWindowDevice {
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
+    is_running: bool,
 }
 
 impl Device for GlWindowDevice {
@@ -177,7 +178,12 @@ impl Device for GlWindowDevice {
         self.events.upgrade(dest)
     }
 
+    fn is_running(&self) -> bool {
+        self.is_running
+    }
+
     fn quit(&mut self) {
+        self.is_running = false;
         self.events.callback(Event::SessionEnd);
     }
 
@@ -204,6 +210,7 @@ impl GlWindowDevice {
             read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),
+            is_running: true,
         })
     }
 
