@@ -165,6 +165,7 @@ impl MagicLeapDevice {
             frame_handle,
             cameras,
             view_update_needed: false,
+            is_running: true,
         };
 
         // Rather annoyingly, in order for the views to be available, we have to
