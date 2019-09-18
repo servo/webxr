@@ -266,11 +266,12 @@ impl OpenXrDevice {
     }
 
     fn handle_openxr_events(&mut self) {
-        let mut buffer = openxr::EventDataBuffer::new();
-        while let Some(event) = self.instance.poll_event(&mut buffer).unwrap() {
-            use openxr::Event::*;
+        use openxr::Event::*;
+        loop {
+            let mut buffer = openxr::EventDataBuffer::new();
+            let event = self.instance.poll_event(&mut buffer).unwrap();
             match event {
-                SessionStateChanged(session_change) => match session_change.state() {
+                Some(SessionStateChanged(session_change)) => match session_change.state() {
                     openxr::SessionState::STOPPING => {
                         self.events.callback(Event::SessionEnd);
                         self.session.end().unwrap();
@@ -280,8 +281,12 @@ impl OpenXrDevice {
                         // FIXME: Handle other states
                     }
                 },
-                _ => {
+                Some(_) => {
                     // FIXME: Handle other events
+                }
+                None => {
+                    // No more events to process
+                    break;
                 }
             }
         }
