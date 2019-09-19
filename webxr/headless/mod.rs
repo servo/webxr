@@ -58,7 +58,6 @@ struct InputInfo {
 struct HeadlessDevice {
     gl: Rc<dyn Gl>,
     data: Arc<Mutex<HeadlessDeviceData>>,
-    is_running: bool,
 }
 
 struct HeadlessDeviceData {
@@ -120,13 +119,7 @@ impl Discovery for HeadlessDiscovery {
         }
         let gl = self.gl.clone();
         let data = self.data.clone();
-        xr.run_on_main_thread(move || {
-            Ok(HeadlessDevice {
-                gl,
-                data,
-                is_running: true,
-            })
-        })
+        xr.run_on_main_thread(move || Ok(HeadlessDevice { gl, data }))
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
@@ -143,7 +136,7 @@ impl Device for HeadlessDevice {
         self.data.lock().unwrap().views.clone()
     }
 
-    fn wait_for_animation_frame(&mut self) -> Frame {
+    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         let mut data = self.data.lock().unwrap();
         let transform = data.viewer_origin;
         let inputs = data
@@ -162,11 +155,11 @@ impl Device for HeadlessDevice {
         } else {
             vec![]
         };
-        Frame {
+        Some(Frame {
             transform,
             inputs,
             events,
-        }
+        })
     }
 
     fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: Option<GLsync>) {
@@ -184,12 +177,7 @@ impl Device for HeadlessDevice {
         self.data.lock().unwrap().events.upgrade(dest)
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
     fn quit(&mut self) {
-        self.is_running = false;
         self.data.lock().unwrap().events.callback(Event::SessionEnd);
     }
 

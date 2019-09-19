@@ -122,7 +122,6 @@ struct OpenXrDevice {
     resource: ComPtr<dxgi::IDXGIResource>,
     device_context: ComPtr<d3d11::ID3D11DeviceContext>,
     device: ComPtr<d3d11::ID3D11Device>,
-    is_running: bool,
 }
 
 impl OpenXrDevice {
@@ -261,11 +260,10 @@ impl OpenXrDevice {
             resource,
             device_context,
             device,
-            is_running: true,
         })
     }
 
-    fn handle_openxr_events(&mut self) {
+    fn handle_openxr_events(&mut self) -> bool {
         use openxr::Event::*;
         loop {
             let mut buffer = openxr::EventDataBuffer::new();
@@ -275,12 +273,18 @@ impl OpenXrDevice {
                     openxr::SessionState::STOPPING => {
                         self.events.callback(Event::SessionEnd);
                         self.session.end().unwrap();
-                        self.is_running = false;
+                        return false;
+                    }
+                    openxr::SessionState::EXITING | openxr::SessionState::LOSS_PENDING => {
+                        break;
                     }
                     _ => {
                         // FIXME: Handle other states
                     }
                 },
+                Some(InstanceLossPending(_)) => {
+                    break;
+                }
                 Some(_) => {
                     // FIXME: Handle other events
                 }
@@ -290,6 +294,7 @@ impl OpenXrDevice {
                 }
             }
         }
+        true
     }
 }
 
@@ -336,12 +341,11 @@ impl Device for OpenXrDevice {
         Views::Stereo(left_view, right_view)
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
-    fn wait_for_animation_frame(&mut self) -> Frame {
-        self.handle_openxr_events();
+    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
+        if !self.handle_openxr_events() {
+            // Session is not running anymore.
+            return None;
+        }
         self.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
         // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, views) = self
@@ -361,11 +365,11 @@ impl Device for OpenXrDevice {
         } else {
             vec![]
         };
-        Frame {
+        Some(Frame {
             transform,
             inputs: vec![],
             events,
-        }
+        })
     }
 
     fn render_animation_frame(

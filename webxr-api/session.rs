@@ -205,12 +205,14 @@ impl<D: Device> SessionThread<D> {
             }
             SessionMsg::RequestAnimationFrame(dest) => {
                 let timestamp = self.timestamp;
-                if self.device.is_running() {
-                    let frame = self.device.wait_for_animation_frame();
-                    let _ = dest.send((timestamp, frame));
-                } else {
-                    return false;
-                }
+                match self.device.wait_for_animation_frame() {
+                    Some(frame) => {
+                        let _ = dest.send((timestamp, frame));
+                    }
+                    None => {
+                        return false;
+                    }
+                };
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {

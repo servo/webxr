@@ -63,7 +63,6 @@ pub(crate) struct GoogleVRDevice {
     depth: bool,
     clip_planes: ClipPlanes,
     input: Option<GoogleVRController>,
-    is_running: bool,
 
     #[cfg(target_os = "android")]
     java_class: ndk::jclass,
@@ -99,7 +98,6 @@ impl GoogleVRDevice {
             depth: false,
             clip_planes: Default::default(),
             input: None,
-            is_running: true,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -141,7 +139,6 @@ impl GoogleVRDevice {
             depth: false,
             clip_planes: Default::default(),
             input: None,
-            is_running: true,
 
             ctx: ctx.get(),
             controller_ctx: controller_ctx.get(),
@@ -532,7 +529,7 @@ impl Device for GoogleVRDevice {
         }
     }
 
-    fn wait_for_animation_frame(&mut self) -> Frame {
+    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         unsafe {
             self.acquire_frame();
         }
@@ -542,11 +539,11 @@ impl Device for GoogleVRDevice {
             vec![]
         };
         // Predict head matrix
-        Frame {
+        Some(Frame {
             transform: self.fetch_head_matrix(),
             inputs: self.input_state(),
             events,
-        }
+        })
     }
 
     fn render_animation_frame(
@@ -582,14 +579,9 @@ impl Device for GoogleVRDevice {
         self.events.upgrade(dest);
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
     fn quit(&mut self) {
         self.stop_present();
         self.events.callback(Event::SessionEnd);
-        self.is_running = false;
     }
 
     fn set_quitter(&mut self, _: Quitter) {

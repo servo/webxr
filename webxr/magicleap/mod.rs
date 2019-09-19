@@ -98,7 +98,6 @@ pub struct MagicLeapDevice {
     frame_handle: MLHandle,
     cameras: MLGraphicsVirtualCameraInfoArray,
     view_update_needed: bool,
-    is_running: bool,
 }
 
 impl MagicLeapDiscovery {
@@ -165,7 +164,6 @@ impl MagicLeapDevice {
             frame_handle,
             cameras,
             view_update_needed: false,
-            is_running: true,
         };
 
         // Rather annoyingly, in order for the views to be available, we have to
@@ -444,12 +442,7 @@ impl Device for MagicLeapDevice {
         // TODO: handle events
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
     fn quit(&mut self) {
-        self.is_running = false;
         // TODO: handle quit
     }
 
