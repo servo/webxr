@@ -125,6 +125,14 @@ impl Device for GlWindowDevice {
         size: UntypedSize2D<i32>,
         sync: Option<GLsync>,
     ) {
+        // Perform the sync while the old window's GL context is active,
+        // or it won't actually do anything - the XR window's GL context
+        // doesn't recognize the sync object and triggers GL_INVALID_OPERATION.
+        if let Some(sync) = sync {
+            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        }
+
         self.window.make_current();
 
         let width = size.width as GLsizei;
@@ -134,11 +142,6 @@ impl Device for GlWindowDevice {
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        if let Some(sync) = sync {
-            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-        }
 
         self.gl
             .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
