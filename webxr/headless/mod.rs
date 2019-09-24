@@ -31,20 +31,17 @@ use euclid::default::Size2D;
 use euclid::RigidTransform3D;
 
 use gleam::gl;
-use gleam::gl::GLsync;
 use gleam::gl::GLuint;
-use gleam::gl::Gl;
 
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-pub struct HeadlessMockDiscovery {
-    gl: Rc<dyn Gl>,
-}
+use surfman::platform::generic::universal::surface::Surface;
+
+pub struct HeadlessMockDiscovery {}
 
 struct HeadlessDiscovery {
-    gl: Rc<dyn Gl>,
     data: Arc<Mutex<HeadlessDeviceData>>,
     supports_immersive: bool,
 }
@@ -56,7 +53,6 @@ struct InputInfo {
 }
 
 struct HeadlessDevice {
-    gl: Rc<dyn Gl>,
     data: Arc<Mutex<HeadlessDeviceData>>,
 }
 
@@ -97,7 +93,6 @@ impl MockDiscovery for HeadlessMockDiscovery {
             run_loop(receiver, data_);
         });
         Ok(Box::new(HeadlessDiscovery {
-            gl: self.gl.clone(),
             data,
             supports_immersive: init.supports_immersive,
         }))
@@ -117,9 +112,8 @@ impl Discovery for HeadlessDiscovery {
         if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
-        let gl = self.gl.clone();
         let data = self.data.clone();
-        xr.run_on_main_thread(move || Ok(HeadlessDevice { gl, data }))
+        xr.run_on_main_thread(move || Ok(HeadlessDevice { data }))
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
@@ -164,11 +158,8 @@ impl Device for HeadlessDevice {
         })
     }
 
-    fn render_animation_frame(&mut self, _: GLuint, _: Size2D<i32>, sync: Option<GLsync>) {
-        if let Some(sync) = sync {
-            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-        }
+    fn render_animation_frame(&mut self, surface: Surface) -> Surface {
+        surface
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -194,8 +185,8 @@ impl Device for HeadlessDevice {
 }
 
 impl HeadlessMockDiscovery {
-    pub fn new(gl: Rc<dyn Gl>) -> HeadlessMockDiscovery {
-        HeadlessMockDiscovery { gl }
+    pub fn new() -> HeadlessMockDiscovery {
+        HeadlessMockDiscovery {}
     }
 }
 

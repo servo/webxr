@@ -4,6 +4,12 @@
 
 //! This crate defines the Rust API for WebXR. It is implemented by the `webxr` crate.
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
+#[cfg(feature = "ipc")]
+use serde::{Deserialize, Serialize};
+
 mod device;
 mod error;
 mod events;
@@ -13,7 +19,6 @@ mod mock;
 mod registry;
 mod session;
 mod view;
-mod webgl;
 
 pub use device::Device;
 pub use device::Discovery;
@@ -64,9 +69,18 @@ pub use view::Viewer;
 pub use view::Viewport;
 pub use view::Views;
 
-pub use webgl::WebGLContextId;
-pub use webgl::WebGLExternalImageApi;
-pub use webgl::WebGLTextureId;
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct SwapChainId(usize);
+
+impl SwapChainId {
+    pub fn new() -> Self {
+        let id = NEXT_SWAP_CHAIN_ID.fetch_add(1, Ordering::SeqCst);
+        Self(id)
+    }
+}
+
+static NEXT_SWAP_CHAIN_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(feature = "ipc")]
 use std::thread;

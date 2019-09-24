@@ -12,20 +12,18 @@ use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
+use crate::SwapChainId;
 use crate::Viewport;
 use crate::Views;
-use crate::WebGLContextId;
-use crate::WebGLExternalImageApi;
-use crate::WebGLTextureId;
 
-use euclid::default::Size2D as UntypedSize2D;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
-use gleam::gl::GLsizei;
-
 use std::thread;
 use std::time::Duration;
+
+use surfman_chains::SwapChain;
+use surfman_chains::SwapChains;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -57,7 +55,7 @@ pub type HighResTimeStamp = f64;
 // The messages that are sent from the content thread to the session thread.
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
-    SetTexture(WebGLContextId, WebGLTextureId, UntypedSize2D<GLsizei>),
+    SetSwapChain(Option<SwapChainId>),
     SetEventDest(Sender<Event>),
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
     RequestAnimationFrame(Sender<(HighResTimeStamp, Frame)>),
@@ -111,13 +109,8 @@ impl Session {
         self.resolution
     }
 
-    pub fn set_texture(
-        &mut self,
-        ctxt: WebGLContextId,
-        txt: WebGLTextureId,
-        size: UntypedSize2D<GLsizei>,
-    ) {
-        let _ = self.sender.send(SessionMsg::SetTexture(ctxt, txt, size));
+    pub fn set_swap_chain(&mut self, swap_chain_id: Option<SwapChainId>) {
+        let _ = self.sender.send(SessionMsg::SetSwapChain(swap_chain_id));
     }
 
     pub fn request_animation_frame(&mut self, dest: Sender<(HighResTimeStamp, Frame)>) {
@@ -151,8 +144,8 @@ impl Session {
 pub struct SessionThread<D> {
     receiver: Receiver<SessionMsg>,
     sender: Sender<SessionMsg>,
-    webgl: Box<dyn WebGLExternalImageApi>,
-    texture: Option<(WebGLContextId, WebGLTextureId, UntypedSize2D<GLsizei>)>,
+    swap_chain: Option<SwapChain>,
+    swap_chains: SwapChains<SwapChainId>,
     timestamp: HighResTimeStamp,
     running: bool,
     device: D,
@@ -161,21 +154,21 @@ pub struct SessionThread<D> {
 impl<D: Device> SessionThread<D> {
     pub fn new(
         mut device: D,
-        webgl: Box<dyn WebGLExternalImageApi>,
+        swap_chains: SwapChains<SwapChainId>,
     ) -> Result<SessionThread<D>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         device.set_quitter(Quitter {
             sender: sender.clone(),
         });
         let timestamp = 0.0;
-        let texture = None;
+        let swap_chain = None;
         let running = true;
         Ok(SessionThread {
             sender,
             receiver,
             device,
-            webgl,
-            texture,
+            swap_chain,
+            swap_chains,
             timestamp,
             running,
         })
@@ -213,8 +206,8 @@ impl<D: Device> SessionThread<D> {
 
     fn handle_msg(&mut self, msg: SessionMsg) -> bool {
         match msg {
-            SessionMsg::SetTexture(ctxt, txt, size) => {
-                self.texture = Some((ctxt, txt, size));
+            SessionMsg::SetSwapChain(swap_chain_id) => {
+                self.swap_chain = swap_chain_id.and_then(|id| self.swap_chains.get(id));
             }
             SessionMsg::SetEventDest(dest) => {
                 self.device.set_event_dest(dest);
@@ -233,10 +226,11 @@ impl<D: Device> SessionThread<D> {
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
                 self.timestamp += 1.0;
-                if let Some((ctxt, txt, size)) = self.texture {
-                    let sync = self.webgl.lock(ctxt);
-                    self.device.render_animation_frame(txt, size, sync);
-                    self.webgl.unlock(ctxt);
+                if let Some(ref swap_chain) = self.swap_chain {
+                    if let Some(surface) = swap_chain.take_surface() {
+                        let surface = self.device.render_animation_frame(surface);
+                        swap_chain.recycle_surface(surface);
+                    }
                 }
             }
             SessionMsg::Quit => {
@@ -272,16 +266,19 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
 
 /// A type for building XR sessions
 pub struct SessionBuilder<'a> {
-    webgl: &'a dyn WebGLExternalImageApi,
+    swap_chains: &'a SwapChains<SwapChainId>,
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
 }
 
 impl<'a> SessionBuilder<'a> {
     pub(crate) fn new(
-        webgl: &'a dyn WebGLExternalImageApi,
+        swap_chains: &'a SwapChains<SwapChainId>,
         sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
     ) -> SessionBuilder<'a> {
-        SessionBuilder { webgl, sessions }
+        SessionBuilder {
+            swap_chains,
+            sessions,
+        }
     }
 
     /// For devices which are happy to hand over thread management to webxr.
@@ -291,9 +288,9 @@ impl<'a> SessionBuilder<'a> {
         D: Device,
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
-        let webgl = self.webgl.clone_box();
+        let swap_chains = self.swap_chains.clone();
         thread::spawn(move || {
-            match factory().and_then(|device| SessionThread::new(device, webgl)) {
+            match factory().and_then(|device| SessionThread::new(device, swap_chains)) {
                 Ok(mut thread) => {
                     let session = thread.new_session();
                     let _ = acks.send(Ok(session));
@@ -314,8 +311,8 @@ impl<'a> SessionBuilder<'a> {
         D: Device,
     {
         let device = factory()?;
-        let webgl = self.webgl.clone_box();
-        let mut session_thread = SessionThread::new(device, webgl)?;
+        let swap_chains = self.swap_chains.clone();
+        let mut session_thread = SessionThread::new(device, swap_chains)?;
         let session = session_thread.new_session();
         self.sessions.push(Box::new(session_thread));
         Ok(session)
