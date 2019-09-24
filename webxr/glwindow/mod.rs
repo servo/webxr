@@ -89,7 +89,6 @@ pub struct GlWindowDevice {
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
-    is_running: bool,
 }
 
 impl Device for GlWindowDevice {
@@ -104,7 +103,7 @@ impl Device for GlWindowDevice {
         Views::Stereo(left, right)
     }
 
-    fn wait_for_animation_frame(&mut self) -> Frame {
+    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         self.window.swap_buffers();
         let translation = Vector3D::new(0.0, 0.0, -5.0);
         let transform = RigidTransform3D::from_translation(translation);
@@ -113,11 +112,11 @@ impl Device for GlWindowDevice {
         } else {
             vec![]
         };
-        Frame {
+        Some(Frame {
             transform,
             inputs: vec![],
             events,
-        }
+        })
     }
 
     fn render_animation_frame(
@@ -178,12 +177,7 @@ impl Device for GlWindowDevice {
         self.events.upgrade(dest)
     }
 
-    fn is_running(&self) -> bool {
-        self.is_running
-    }
-
     fn quit(&mut self) {
-        self.is_running = false;
         self.events.callback(Event::SessionEnd);
     }
 
@@ -210,7 +204,6 @@ impl GlWindowDevice {
             read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),
-            is_running: true,
         })
     }
 
