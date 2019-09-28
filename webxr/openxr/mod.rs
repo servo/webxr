@@ -426,7 +426,7 @@ impl Device for OpenXrDevice {
             0,
             size.width / 2,
             size.height,
-            gl::RGBA,
+            gl::BGRA,
             gl::UNSIGNED_BYTE,
         );
         let left_data = flip_vec(&left_data, size.width as usize / 2, size.height as usize);
@@ -439,7 +439,7 @@ impl Device for OpenXrDevice {
         let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
             Width: (size.width / 2) as u32,
             Height: size.height as u32,
-            Format: dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            Format: dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
             MipLevels: 1,
             ArraySize: 1,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
@@ -699,7 +699,7 @@ fn create_texture(
     };
     let mut d3dtex_ptr = ptr::null_mut();
     // XXXManishearth we should be able to handle other formats
-    assert_eq!(format, dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM);
+    assert_eq!(format, dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM);
     let mut data = vec![0u8; width as usize * height as usize * mem::size_of::<u32>()];
     for pixels in data.chunks_mut(mem::size_of::<u32>()) {
         pixels[0] = 255;
