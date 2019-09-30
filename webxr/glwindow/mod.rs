@@ -8,9 +8,11 @@ use euclid::Angle;
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
+use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Trig;
+use euclid::UnknownUnit;
 use euclid::Vector3D;
 
 use gleam::gl;
@@ -47,21 +49,22 @@ const HEIGHT: f32 = 1.0;
 const EYE_DISTANCE: f32 = 0.25;
 
 pub trait GlWindow {
-    fn make_current(&mut self);
-    fn swap_buffers(&mut self);
+    fn make_current(&self);
+    fn swap_buffers(&self);
     fn size(&self) -> UntypedSize2D<GLsizei>;
-    fn new_window(&self) -> Result<Box<dyn GlWindow>, ()>;
+    fn new_window(&self) -> Result<Rc<dyn GlWindow>, ()>;
+    fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit>;
 }
 
 pub struct GlWindowDiscovery {
     gl: Rc<dyn Gl>,
-    factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
+    factory: Box<dyn Fn() -> Result<Rc<dyn GlWindow>, ()>>,
 }
 
 impl GlWindowDiscovery {
     pub fn new(
         gl: Rc<dyn Gl>,
-        factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
+        factory: Box<dyn Fn() -> Result<Rc<dyn GlWindow>, ()>>,
     ) -> GlWindowDiscovery {
         GlWindowDiscovery { gl, factory }
     }
@@ -85,7 +88,7 @@ impl Discovery for GlWindowDiscovery {
 
 pub struct GlWindowDevice {
     gl: Rc<dyn Gl>,
-    window: Box<dyn GlWindow>,
+    window: Rc<dyn GlWindow>,
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
@@ -106,7 +109,11 @@ impl Device for GlWindowDevice {
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         self.window.swap_buffers();
         let translation = Vector3D::new(0.0, 0.0, -5.0);
-        let transform = RigidTransform3D::from_translation(translation);
+        let translation: RigidTransform3D<_, _, Native> =
+            RigidTransform3D::from_translation(translation);
+        let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
+        let rotation = RigidTransform3D::from_rotation(rotation);
+        let transform = translation.post_transform(&rotation);
         let events = if self.clip_planes.recently_updated() {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {
@@ -193,7 +200,7 @@ impl Device for GlWindowDevice {
 }
 
 impl GlWindowDevice {
-    fn new(gl: Rc<dyn Gl>, mut window: Box<dyn GlWindow>) -> Result<GlWindowDevice, Error> {
+    fn new(gl: Rc<dyn Gl>, window: Rc<dyn GlWindow>) -> Result<GlWindowDevice, Error> {
         window.make_current();
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
