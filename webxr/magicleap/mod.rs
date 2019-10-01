@@ -380,7 +380,7 @@ impl MagicLeapDevice {
 }
 
 impl Device for MagicLeapDevice {
-    fn wait_for_animation_frame(&mut self) -> Frame {
+    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         if let Err(err) = self.start_frame() {
             error!("Failed to start frame ({:?}).", err);
         }
@@ -392,11 +392,11 @@ impl Device for MagicLeapDevice {
         } else {
             vec![]
         };
-        Frame {
+        Some(Frame {
             transform,
             inputs,
             events,
-        }
+        })
     }
 
     fn render_animation_frame(
