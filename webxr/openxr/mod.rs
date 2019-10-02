@@ -11,11 +11,12 @@ use gleam::gl::{self, GLsync, GLuint, Gl};
 use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
-    self, ApplicationInfo, CompositionLayerFlags, CompositionLayerProjection, Entry,
-    EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor, Fovf, FrameState, FrameStream,
-    FrameWaiter, Graphics, Instance, Posef, Quaternionf, ReferenceSpaceType, Session, Space,
-    Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags, Vector3f,
-    ViewConfigurationType, ViewConfigurationView,
+    self, Action, ActionSet, ActiveActionSet, ApplicationInfo, Binding, CompositionLayerFlags,
+    CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
+    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Path, Posef, Quaternionf,
+    ReferenceSpaceType, Session, Space, SpaceLocationFlags, Swapchain, SwapchainCreateFlags,
+    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
+    ViewConfigurationView,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -122,6 +123,12 @@ struct OpenXrDevice {
     resource: ComPtr<dxgi::IDXGIResource>,
     device_context: ComPtr<d3d11::ID3D11DeviceContext>,
     device: ComPtr<d3d11::ID3D11Device>,
+
+    // input
+    action_pose: Action<Posef>,
+    action_click: Action<bool>,
+    action_set: ActionSet,
+    currently_clicked: bool,
 }
 
 impl OpenXrDevice {
@@ -237,6 +244,31 @@ impl OpenXrDevice {
             format,
         );
 
+        // input
+
+        let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
+        let action_pose: Action<Posef> = action_set
+            .create_action("right_hand", "Right Hand", &[])
+            .unwrap();
+        let action_click: Action<bool> = action_set
+            .create_action("right_hand_click", "Right Hand Click", &[])
+            .unwrap();
+        let path_pose = instance
+            .string_to_path("/user/hand/right/input/aim/pose")
+            .unwrap();
+        let binding_pose = Binding::new(&action_pose, path_pose);
+        let path_click = instance
+            .string_to_path("/user/hand/right/input/select/click")
+            .unwrap();
+        let binding_click = Binding::new(&action_click, path_click);
+        let path_controller = instance
+            .string_to_path("/interaction_profiles/khr/simple_controller")
+            .unwrap();
+        instance
+            .suggest_interaction_profile_bindings(path_controller, &[binding_pose, binding_click])
+            .unwrap();
+        session.attach_action_sets(&[&action_set]).unwrap();
+
         Ok(OpenXrDevice {
             instance,
             events: Default::default(),
@@ -260,6 +292,11 @@ impl OpenXrDevice {
             resource,
             device_context,
             device,
+
+            action_pose,
+            action_click,
+            action_set,
+            currently_clicked: false,
         })
     }
 
@@ -365,6 +402,41 @@ impl Device for OpenXrDevice {
         } else {
             vec![]
         };
+
+        let active_action_set = ActiveActionSet::new(&self.action_set);
+
+        self.session.sync_actions(&[active_action_set]).unwrap();
+        let click_state = self.action_click.state(&self.session, Path::NULL).unwrap();
+
+        if click_state.is_active {
+            if click_state.current_state != self.currently_clicked {
+                self.currently_clicked = click_state.current_state;
+                // todo send selection events
+            }
+        }
+
+        let identity_pose = Posef {
+            orientation: Quaternionf {
+                x: 0.,
+                y: 0.,
+                z: 0.,
+                w: 1.,
+            },
+            position: Vector3f {
+                x: 0.,
+                y: 0.,
+                z: 0.,
+            },
+        };
+        let hand_space = self
+            .action_pose
+            .create_space(self.session.clone(), Path::NULL, identity_pose)
+            .unwrap();
+        let location = hand_space
+            .locate(&self.space, self.frame_state.predicted_display_time)
+            .unwrap();
+
+        // todo use pose in input
         Some(Frame {
             transform,
             inputs: vec![],
