@@ -28,6 +28,9 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
+use webxr_api::Handedness;
+use webxr_api::InputFrame;
+use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
@@ -35,6 +38,7 @@ use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
 use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
+use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
@@ -436,10 +440,23 @@ impl Device for OpenXrDevice {
             .locate(&self.space, self.frame_state.predicted_display_time)
             .unwrap();
 
+        let pose_valid = location
+            .location_flags
+            .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
+        let target_ray_origin = if pose_valid {
+            Some(self::transform(&location.pose))
+        } else {
+            None
+        };
+
+        let input_frame = InputFrame {
+            target_ray_origin,
+            id: InputId(0),
+        };
         // todo use pose in input
         Some(Frame {
             transform,
-            inputs: vec![],
+            inputs: vec![input_frame],
             events,
         })
     }
@@ -643,7 +660,11 @@ impl Device for OpenXrDevice {
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
-        vec![]
+        vec![InputSource {
+            handedness: Handedness::Right,
+            id: InputId(0),
+            target_ray_mode: TargetRayMode::TrackedPointer,
+        }]
     }
 
     fn set_event_dest(&mut self, dest: Sender<Event>) {
