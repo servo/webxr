@@ -34,6 +34,7 @@ use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::SelectEvent;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
 use webxr_api::SessionBuilder;
@@ -102,6 +103,15 @@ impl Discovery for OpenXrDiscovery {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ClickState {
+    Clicking,
+    /// it's clicking, but it lost tracking during the click,
+    /// so we'll only fire a selectend event
+    ClickingLost,
+    Done,
+}
+
 struct OpenXrDevice {
     instance: Instance,
     #[allow(unused)]
@@ -132,7 +142,7 @@ struct OpenXrDevice {
     action_pose: Action<Posef>,
     action_click: Action<bool>,
     action_set: ActionSet,
-    currently_clicked: bool,
+    click_state: ClickState,
 }
 
 impl OpenXrDevice {
@@ -300,7 +310,7 @@ impl OpenXrDevice {
             action_pose,
             action_click,
             action_set,
-            currently_clicked: false,
+            click_state: ClickState::Done,
         })
     }
 
@@ -410,14 +420,6 @@ impl Device for OpenXrDevice {
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
         self.session.sync_actions(&[active_action_set]).unwrap();
-        let click_state = self.action_click.state(&self.session, Path::NULL).unwrap();
-
-        if click_state.is_active {
-            if click_state.current_state != self.currently_clicked {
-                self.currently_clicked = click_state.current_state;
-                // todo send selection events
-            }
-        }
 
         let identity_pose = Posef {
             orientation: Quaternionf {
@@ -449,16 +451,45 @@ impl Device for OpenXrDevice {
             None
         };
 
+        let id = InputId(0);
         let input_frame = InputFrame {
             target_ray_origin,
-            id: InputId(0),
+            id,
         };
-        // todo use pose in input
-        Some(Frame {
+
+        let click = self.action_click.state(&self.session, Path::NULL).unwrap();
+
+        let frame = Frame {
             transform,
             inputs: vec![input_frame],
             events,
-        })
+        };
+
+        if click.is_active {
+            match (click.current_state, self.click_state) {
+                (true, ClickState::Done) => {
+                    self.click_state = ClickState::Clicking;
+                    self.events
+                        .callback(Event::Select(id, SelectEvent::Start, frame.clone()));
+                }
+                (false, ClickState::Clicking) => {
+                    self.click_state = ClickState::Done;
+                    self.events
+                        .callback(Event::Select(id, SelectEvent::Select, frame.clone()));
+                }
+                (false, ClickState::ClickingLost) => {
+                    self.click_state = ClickState::Done;
+                    self.events
+                        .callback(Event::Select(id, SelectEvent::End, frame.clone()));
+                }
+                _ => (),
+            }
+        } else if self.click_state == ClickState::Clicking {
+            self.click_state = ClickState::ClickingLost;
+        }
+
+        // todo use pose in input
+        Some(frame)
     }
 
     fn render_animation_frame(
