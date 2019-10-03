@@ -492,7 +492,6 @@ impl Device for OpenXrDevice {
         let right_swapchain_images = self.right_swapchain.enumerate_images().unwrap();
         let right_image = right_swapchain_images[self.right_image as usize];
 
-        let texture_resource = self.texture.clone().up::<d3d11::ID3D11Resource>();
         let b = d3d11::D3D11_BOX {
             left: 0,
             top: 0,
