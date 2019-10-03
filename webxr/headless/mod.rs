@@ -145,7 +145,7 @@ impl Device for HeadlessDevice {
             .filter(|i| i.active)
             .map(|i| InputFrame {
                 id: i.source.id,
-                target_ray_origin: i.pointer,
+                target_ray_origin: Some(i.pointer),
             })
             .collect();
 

@@ -2,11 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::Frame;
 use crate::InputId;
 use crate::InputSource;
+use crate::SelectEvent;
 use crate::Sender;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum Event {
     /// Input source connected
@@ -17,6 +19,8 @@ pub enum Event {
     SessionEnd,
     /// Session focused/blurred/etc
     VisibilityChange(Visibility),
+    /// Selection started / ended
+    Select(InputId, SelectEvent, Frame),
 }
 
 #[derive(Copy, Clone, Debug)]
