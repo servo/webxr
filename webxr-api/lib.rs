@@ -31,6 +31,7 @@ pub use input::Handedness;
 pub use input::InputFrame;
 pub use input::InputId;
 pub use input::InputSource;
+pub use input::SelectEvent;
 pub use input::TargetRayMode;
 
 pub use mock::MockDeviceInit;

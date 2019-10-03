@@ -505,7 +505,7 @@ impl GoogleVRDevice {
     fn input_state(&self) -> Vec<InputFrame> {
         if let Some(ref i) = self.input {
             vec![InputFrame {
-                target_ray_origin: i.state(),
+                target_ray_origin: Some(i.state()),
                 id: InputId(0),
             }]
         } else {

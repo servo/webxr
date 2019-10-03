@@ -35,9 +35,20 @@ pub struct InputSource {
     pub id: InputId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputFrame {
     pub id: InputId,
-    pub target_ray_origin: RigidTransform3D<f32, Input, Native>,
+    pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum SelectEvent {
+    /// Selection started
+    Start,
+    /// Selection ended *without* it being a contiguous select event
+    End,
+    /// Selection ended *with* it being a contiguous select event
+    Select,
 }
