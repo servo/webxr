@@ -451,13 +451,16 @@ impl Device for OpenXrDevice {
             None
         };
 
+        let click = self.action_click.state(&self.session, Path::NULL).unwrap();
+
         let id = InputId(0);
         let input_frame = InputFrame {
             target_ray_origin,
             id,
+            pressed: click.is_active && click.current_state,
+            grip_origin: None,
         };
 
-        let click = self.action_click.state(&self.session, Path::NULL).unwrap();
 
         let frame = Frame {
             transform,
@@ -695,6 +698,7 @@ impl Device for OpenXrDevice {
             handedness: Handedness::Right,
             id: InputId(0),
             target_ray_mode: TargetRayMode::TrackedPointer,
+            supports_grip: false,
         }]
     }
 

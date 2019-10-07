@@ -33,6 +33,7 @@ pub struct InputSource {
     pub handedness: Handedness,
     pub target_ray_mode: TargetRayMode,
     pub id: InputId,
+    pub supports_grip: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -40,6 +41,8 @@ pub struct InputSource {
 pub struct InputFrame {
     pub id: InputId,
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
+    pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
+    pub pressed: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
