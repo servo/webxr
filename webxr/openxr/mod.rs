@@ -11,12 +11,11 @@ use gleam::gl::{self, GLsync, GLuint, Gl};
 use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
-    self, Action, ActionSet, ActiveActionSet, ApplicationInfo, Binding, CompositionLayerFlags,
+    self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
-    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Path, Posef, Quaternionf,
-    ReferenceSpaceType, Session, Space, SpaceLocationFlags, Swapchain, SwapchainCreateFlags,
-    SwapchainCreateInfo, SwapchainUsageFlags, Vector3f, ViewConfigurationType,
-    ViewConfigurationView,
+    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef, Quaternionf,
+    ReferenceSpaceType, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
+    SwapchainUsageFlags, Vector3f, ViewConfigurationType, ViewConfigurationView,
 };
 use std::rc::Rc;
 use std::{mem, ptr};
@@ -29,7 +28,6 @@ use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
 use webxr_api::Handedness;
-use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
@@ -51,6 +49,9 @@ use winapi::um::d3d11;
 use winapi::um::d3dcommon::*;
 use winapi::Interface;
 use wio::com::ComPtr;
+
+mod input;
+use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.0;
 
@@ -139,9 +140,8 @@ struct OpenXrDevice {
     device: ComPtr<d3d11::ID3D11Device>,
 
     // input
-    action_pose: Action<Posef>,
-    action_click: Action<bool>,
     action_set: ActionSet,
+    right_hand: OpenXRInput,
     click_state: ClickState,
 }
 
@@ -261,26 +261,7 @@ impl OpenXrDevice {
         // input
 
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
-        let action_pose: Action<Posef> = action_set
-            .create_action("right_hand", "Right Hand", &[])
-            .unwrap();
-        let action_click: Action<bool> = action_set
-            .create_action("right_hand_click", "Right Hand Click", &[])
-            .unwrap();
-        let path_pose = instance
-            .string_to_path("/user/hand/right/input/aim/pose")
-            .unwrap();
-        let binding_pose = Binding::new(&action_pose, path_pose);
-        let path_click = instance
-            .string_to_path("/user/hand/right/input/select/click")
-            .unwrap();
-        let binding_click = Binding::new(&action_click, path_click);
-        let path_controller = instance
-            .string_to_path("/interaction_profiles/khr/simple_controller")
-            .unwrap();
-        instance
-            .suggest_interaction_profile_bindings(path_controller, &[binding_pose, binding_click])
-            .unwrap();
+        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &instance, &action_set);
         session.attach_action_sets(&[&action_set]).unwrap();
 
         Ok(OpenXrDevice {
@@ -307,9 +288,8 @@ impl OpenXrDevice {
             device_context,
             device,
 
-            action_pose,
-            action_click,
             action_set,
+            right_hand,
             click_state: ClickState::Done,
         })
     }
@@ -421,46 +401,9 @@ impl Device for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let identity_pose = Posef {
-            orientation: Quaternionf {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-                w: 1.,
-            },
-            position: Vector3f {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-        };
-        let hand_space = self
-            .action_pose
-            .create_space(self.session.clone(), Path::NULL, identity_pose)
-            .unwrap();
-        let location = hand_space
-            .locate(&self.space, self.frame_state.predicted_display_time)
-            .unwrap();
-
-        let pose_valid = location
-            .location_flags
-            .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
-        let target_ray_origin = if pose_valid {
-            Some(self::transform(&location.pose))
-        } else {
-            None
-        };
-
-        let click = self.action_click.state(&self.session, Path::NULL).unwrap();
-
-        let id = InputId(0);
-        let input_frame = InputFrame {
-            target_ray_origin,
-            id,
-            pressed: click.is_active && click.current_state,
-            grip_origin: None,
-        };
-
+        let (input_frame, click) =
+            self.right_hand
+                .frame(&self.session, &self.frame_state, &self.space);
 
         let frame = Frame {
             transform,
@@ -472,18 +415,27 @@ impl Device for OpenXrDevice {
             match (click.current_state, self.click_state) {
                 (true, ClickState::Done) => {
                     self.click_state = ClickState::Clicking;
-                    self.events
-                        .callback(Event::Select(id, SelectEvent::Start, frame.clone()));
+                    self.events.callback(Event::Select(
+                        InputId(0),
+                        SelectEvent::Start,
+                        frame.clone(),
+                    ));
                 }
                 (false, ClickState::Clicking) => {
                     self.click_state = ClickState::Done;
-                    self.events
-                        .callback(Event::Select(id, SelectEvent::Select, frame.clone()));
+                    self.events.callback(Event::Select(
+                        InputId(0),
+                        SelectEvent::Select,
+                        frame.clone(),
+                    ));
                 }
                 (false, ClickState::ClickingLost) => {
                     self.click_state = ClickState::Done;
-                    self.events
-                        .callback(Event::Select(id, SelectEvent::End, frame.clone()));
+                    self.events.callback(Event::Select(
+                        InputId(0),
+                        SelectEvent::End,
+                        frame.clone(),
+                    ));
                 }
                 _ => (),
             }
