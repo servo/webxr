@@ -15,10 +15,11 @@ pub struct OpenXRInput {
     action_aim_pose: Action<Posef>,
     action_grip_pose: Action<Posef>,
     action_click: Action<bool>,
+    hand: &'static str,
 }
 
 impl OpenXRInput {
-    pub fn new(id: InputId, hand: Handedness, instance: &Instance, action_set: &ActionSet) -> Self {
+    pub fn new(id: InputId, hand: Handedness, action_set: &ActionSet) -> Self {
         let hand = match hand {
             Handedness::Right => "right",
             Handedness::Left => "left",
@@ -45,33 +46,30 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
-        let path_aim_pose = instance
-            .string_to_path(&format!("/user/hand/{}/input/aim/pose", hand))
-            .unwrap();
-        let binding_aim_pose = Binding::new(&action_aim_pose, path_aim_pose);
-        let path_grip_pose = instance
-            .string_to_path(&format!("/user/hand/{}/input/grip/pose", hand))
-            .unwrap();
-        let binding_grip_pose = Binding::new(&action_grip_pose, path_grip_pose);
-        let path_click = instance
-            .string_to_path(&format!("/user/{}/input/select/click", hand))
-            .unwrap();
-        let binding_click = Binding::new(&action_click, path_click);
-        let path_controller = instance
-            .string_to_path("/interaction_profiles/khr/simple_controller")
-            .unwrap();
-        instance
-            .suggest_interaction_profile_bindings(
-                path_controller,
-                &[binding_aim_pose, binding_grip_pose, binding_click],
-            )
-            .unwrap();
         Self {
             id,
             action_aim_pose,
             action_grip_pose,
             action_click,
+            hand,
         }
+    }
+
+    pub fn get_bindings(&self, instance: &Instance) -> Vec<Binding> {
+        let path_aim_pose = instance
+            .string_to_path(&format!("/user/hand/{}/input/aim/pose", self.hand))
+            .unwrap();
+        let binding_aim_pose = Binding::new(&self.action_aim_pose, path_aim_pose);
+        let path_grip_pose = instance
+            .string_to_path(&format!("/user/hand/{}/input/grip/pose", self.hand))
+            .unwrap();
+        let binding_grip_pose = Binding::new(&self.action_grip_pose, path_grip_pose);
+        let path_click = instance
+            .string_to_path(&format!("/user/hand/{}/input/select/click", self.hand))
+            .unwrap();
+        let binding_click = Binding::new(&self.action_click, path_click);
+
+        vec![binding_aim_pose, binding_grip_pose, binding_click]
     }
 
     pub fn frame(
