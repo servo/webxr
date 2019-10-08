@@ -142,6 +142,7 @@ struct OpenXrDevice {
     // input
     action_set: ActionSet,
     right_hand: OpenXRInput,
+    left_hand: OpenXRInput,
     click_state: ClickState,
 }
 
@@ -262,6 +263,7 @@ impl OpenXrDevice {
 
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
         let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &instance, &action_set);
+        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &instance, &action_set);
         session.attach_action_sets(&[&action_set]).unwrap();
 
         Ok(OpenXrDevice {
@@ -290,6 +292,7 @@ impl OpenXrDevice {
 
             action_set,
             right_hand,
+            left_hand,
             click_state: ClickState::Done,
         })
     }
@@ -401,13 +404,16 @@ impl Device for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let (input_frame, click) =
+        let (right_input_frame, click) =
             self.right_hand
+                .frame(&self.session, &self.frame_state, &self.space);
+        let (left_input_frame, _) =
+            self.left_hand
                 .frame(&self.session, &self.frame_state, &self.space);
 
         let frame = Frame {
             transform,
-            inputs: vec![input_frame],
+            inputs: vec![right_input_frame, left_input_frame],
             events,
         };
 
@@ -646,12 +652,20 @@ impl Device for OpenXrDevice {
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
-        vec![InputSource {
-            handedness: Handedness::Right,
-            id: InputId(0),
-            target_ray_mode: TargetRayMode::TrackedPointer,
-            supports_grip: true,
-        }]
+        vec![
+            InputSource {
+                handedness: Handedness::Right,
+                id: InputId(0),
+                target_ray_mode: TargetRayMode::TrackedPointer,
+                supports_grip: true,
+            },
+            InputSource {
+                handedness: Handedness::Left,
+                id: InputId(1),
+                target_ray_mode: TargetRayMode::TrackedPointer,
+                supports_grip: true,
+            },
+        ]
     }
 
     fn set_event_dest(&mut self, dest: Sender<Event>) {
