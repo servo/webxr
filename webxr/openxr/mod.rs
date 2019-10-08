@@ -32,7 +32,6 @@ use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
-use webxr_api::SelectEvent;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
 use webxr_api::SessionBuilder;
@@ -104,15 +103,6 @@ impl Discovery for OpenXrDiscovery {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum ClickState {
-    Clicking,
-    /// it's clicking, but it lost tracking during the click,
-    /// so we'll only fire a selectend event
-    ClickingLost,
-    Done,
-}
-
 struct OpenXrDevice {
     instance: Instance,
     #[allow(unused)]
@@ -143,7 +133,6 @@ struct OpenXrDevice {
     action_set: ActionSet,
     right_hand: OpenXRInput,
     left_hand: OpenXRInput,
-    click_state: ClickState,
 }
 
 impl OpenXrDevice {
@@ -301,7 +290,6 @@ impl OpenXrDevice {
             action_set,
             right_hand,
             left_hand,
-            click_state: ClickState::Done,
         })
     }
 
@@ -412,10 +400,10 @@ impl Device for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let (right_input_frame, click) =
+        let (right_input_frame, right_select) =
             self.right_hand
                 .frame(&self.session, &self.frame_state, &self.space);
-        let (left_input_frame, _) =
+        let (left_input_frame, left_select) =
             self.left_hand
                 .frame(&self.session, &self.frame_state, &self.space);
 
@@ -425,36 +413,13 @@ impl Device for OpenXrDevice {
             events,
         };
 
-        if click.is_active {
-            match (click.current_state, self.click_state) {
-                (true, ClickState::Done) => {
-                    self.click_state = ClickState::Clicking;
-                    self.events.callback(Event::Select(
-                        InputId(0),
-                        SelectEvent::Start,
-                        frame.clone(),
-                    ));
-                }
-                (false, ClickState::Clicking) => {
-                    self.click_state = ClickState::Done;
-                    self.events.callback(Event::Select(
-                        InputId(0),
-                        SelectEvent::Select,
-                        frame.clone(),
-                    ));
-                }
-                (false, ClickState::ClickingLost) => {
-                    self.click_state = ClickState::Done;
-                    self.events.callback(Event::Select(
-                        InputId(0),
-                        SelectEvent::End,
-                        frame.clone(),
-                    ));
-                }
-                _ => (),
-            }
-        } else if self.click_state == ClickState::Clicking {
-            self.click_state = ClickState::ClickingLost;
+        if let Some(right_select) = right_select {
+            self.events
+                .callback(Event::Select(InputId(0), right_select, frame.clone()));
+        }
+        if let Some(left_select) = left_select {
+            self.events
+                .callback(Event::Select(InputId(1), left_select, frame.clone()));
         }
 
         // todo use pose in input

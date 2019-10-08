@@ -1,14 +1,24 @@
 use euclid::RigidTransform3D;
 use openxr::d3d::D3D11;
 use openxr::{
-    self, Action, ActionSet, ActionState, Binding, FrameState, Instance, Path, Posef, Quaternionf,
-    Session, Space, SpaceLocationFlags, Vector3f,
+    self, Action, ActionSet, Binding, FrameState, Instance, Path, Posef, Quaternionf, Session,
+    Space, SpaceLocationFlags, Vector3f,
 };
 use webxr_api::Handedness;
 use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::Native;
+use webxr_api::SelectEvent;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ClickState {
+    Clicking,
+    /// it's clicking, but it lost tracking during the click,
+    /// so we'll only fire a selectend event
+    ClickingLost,
+    Done,
+}
 
 pub struct OpenXRInput {
     id: InputId,
@@ -16,6 +26,7 @@ pub struct OpenXRInput {
     action_grip_pose: Action<Posef>,
     action_click: Action<bool>,
     hand: &'static str,
+    click_state: ClickState,
 }
 
 impl OpenXRInput {
@@ -52,6 +63,7 @@ impl OpenXRInput {
             action_grip_pose,
             action_click,
             hand,
+            click_state: ClickState::Done,
         }
     }
 
@@ -73,11 +85,11 @@ impl OpenXRInput {
     }
 
     pub fn frame(
-        &self,
+        &mut self,
         session: &Session<D3D11>,
         frame_state: &FrameState,
         base_space: &Space,
-    ) -> (InputFrame, ActionState<bool>) {
+    ) -> (InputFrame, Option<SelectEvent>) {
         let identity_pose = Posef {
             orientation: Quaternionf {
                 x: 0.,
@@ -109,6 +121,29 @@ impl OpenXRInput {
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
 
+        let select_event = if click.is_active {
+            match (click.current_state, self.click_state) {
+                (true, ClickState::Done) => {
+                    self.click_state = ClickState::Clicking;
+                    Some(SelectEvent::Start)
+                }
+                (false, ClickState::Clicking) => {
+                    self.click_state = ClickState::Done;
+                    Some(SelectEvent::Select)
+                }
+                (false, ClickState::ClickingLost) => {
+                    self.click_state = ClickState::Done;
+                    Some(SelectEvent::End)
+                }
+                _ => None,
+            }
+        } else if self.click_state == ClickState::Clicking {
+            self.click_state = ClickState::ClickingLost;
+            None
+        } else {
+            None
+        };
+
         let input_frame = InputFrame {
             target_ray_origin,
             id: self.id,
@@ -116,7 +151,7 @@ impl OpenXRInput {
             grip_origin,
         };
 
-        (input_frame, click)
+        (input_frame, select_event)
     }
 }
 
