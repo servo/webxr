@@ -7,7 +7,8 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
-use gleam::gl::{self, GLsync, GLuint, Gl};
+use gleam::gl::{self, GLenum, GLsync, GLuint, Gl};
+use log::warn;
 use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::sys::platform::ID3D11Device;
 use openxr::{
@@ -83,6 +84,20 @@ fn create_instance() -> Result<Instance, String> {
         .map_err(|e| format!("{:?}", e))
 }
 
+pub fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> (dxgiformat::DXGI_FORMAT, GLenum) {
+    for format in formats {
+        match *format {
+            dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM => return (*format, gl::BGRA),
+            dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM => return (*format, gl::RGBA),
+            f => {
+                warn!("Backend requested unsupported format {:?}", f);
+            }
+        }
+    }
+
+    panic!("No formats supported amongst {:?}", formats);
+}
+
 impl Discovery for OpenXrDiscovery {
     fn request_session(
         &mut self,
@@ -127,6 +142,8 @@ struct OpenXrDevice {
     clip_planes: ClipPlanes,
     openxr_views: Vec<openxr::View>,
     view_configurations: Vec<openxr::ViewConfigurationView>,
+    format: dxgiformat::DXGI_FORMAT,
+    gl_format: GLenum,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
     left_swapchain: Swapchain<D3D11>,
@@ -224,13 +241,10 @@ impl OpenXrDevice {
         // Create swapchains
 
         // XXXManishearth should we be doing this, or letting Servo set the format?
-        let format = *session
+        let formats = session
             .enumerate_swapchain_formats()
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?
-            .get(0)
-            .ok_or(Error::BackendSpecific(
-                "No available swapchain formats".into(),
-            ))?;
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+        let (format, gl_format) = pick_format(&formats);
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
@@ -300,6 +314,8 @@ impl OpenXrDevice {
             right_image: 0,
             openxr_views: views,
             view_configurations,
+            format,
+            gl_format,
             left_swapchain,
             right_swapchain,
             texture,
@@ -546,7 +562,7 @@ impl Device for OpenXrDevice {
             0,
             size.width / 2,
             size.height,
-            gl::BGRA,
+            self.gl_format,
             gl::UNSIGNED_BYTE,
         );
         let left_data = flip_vec(&left_data, size.width as usize / 2, size.height as usize);
@@ -559,7 +575,7 @@ impl Device for OpenXrDevice {
         let texture_desc = d3d11::D3D11_TEXTURE2D_DESC {
             Width: (size.width / 2) as u32,
             Height: size.height as u32,
-            Format: dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
+            Format: self.format,
             MipLevels: 1,
             ArraySize: 1,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
@@ -822,7 +838,6 @@ fn create_texture(
     };
     let mut d3dtex_ptr = ptr::null_mut();
     // XXXManishearth we should be able to handle other formats
-    assert_eq!(format, dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM);
     let mut data = vec![0u8; width as usize * height as usize * mem::size_of::<u32>()];
     for pixels in data.chunks_mut(mem::size_of::<u32>()) {
         pixels[0] = 255;
