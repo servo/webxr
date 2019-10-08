@@ -650,7 +650,7 @@ impl Device for OpenXrDevice {
             handedness: Handedness::Right,
             id: InputId(0),
             target_ray_mode: TargetRayMode::TrackedPointer,
-            supports_grip: false,
+            supports_grip: true,
         }]
     }
 

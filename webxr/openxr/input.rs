@@ -1,15 +1,19 @@
+use euclid::RigidTransform3D;
 use openxr::d3d::D3D11;
 use openxr::{
     self, Action, ActionSet, ActionState, Binding, FrameState, Instance, Path, Posef, Quaternionf,
     Session, Space, SpaceLocationFlags, Vector3f,
 };
 use webxr_api::Handedness;
+use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
+use webxr_api::Native;
 
 pub struct OpenXRInput {
     id: InputId,
-    action_pose: Action<Posef>,
+    action_aim_pose: Action<Posef>,
+    action_grip_pose: Action<Posef>,
     action_click: Action<bool>,
 }
 
@@ -20,8 +24,19 @@ impl OpenXRInput {
             Handedness::Left => "left",
             _ => panic!("We don't support unknown handedness in openxr"),
         };
-        let action_pose: Action<Posef> = action_set
-            .create_action(&format!("{}_hand", hand), &format!("{} hand", hand), &[])
+        let action_aim_pose: Action<Posef> = action_set
+            .create_action(
+                &format!("{}_hand_aim", hand),
+                &format!("{} hand aim", hand),
+                &[],
+            )
+            .unwrap();
+        let action_grip_pose: Action<Posef> = action_set
+            .create_action(
+                &format!("{}_hand_grip", hand),
+                &format!("{} hand grip", hand),
+                &[],
+            )
             .unwrap();
         let action_click: Action<bool> = action_set
             .create_action(
@@ -30,23 +45,31 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
-        let path_pose = instance
+        let path_aim_pose = instance
             .string_to_path(&format!("/user/hand/{}/input/aim/pose", hand))
             .unwrap();
-        let binding_pose = Binding::new(&action_pose, path_pose);
+        let binding_aim_pose = Binding::new(&action_aim_pose, path_aim_pose);
+        let path_grip_pose = instance
+            .string_to_path(&format!("/user/hand/{}/input/grip/pose", hand))
+            .unwrap();
+        let binding_grip_pose = Binding::new(&action_grip_pose, path_grip_pose);
         let path_click = instance
-            .string_to_path(&format!("/user/hand/{}/input/select/click", hand))
+            .string_to_path(&format!("/user/{}/input/select/click", hand))
             .unwrap();
         let binding_click = Binding::new(&action_click, path_click);
         let path_controller = instance
             .string_to_path("/interaction_profiles/khr/simple_controller")
             .unwrap();
         instance
-            .suggest_interaction_profile_bindings(path_controller, &[binding_pose, binding_click])
+            .suggest_interaction_profile_bindings(
+                path_controller,
+                &[binding_aim_pose, binding_grip_pose, binding_click],
+            )
             .unwrap();
         Self {
             id,
-            action_pose,
+            action_aim_pose,
+            action_grip_pose,
             action_click,
         }
     }
@@ -70,22 +93,21 @@ impl OpenXRInput {
                 z: 0.,
             },
         };
-        let hand_space = self
-            .action_pose
-            .create_space(session.clone(), Path::NULL, identity_pose)
-            .unwrap();
-        let location = hand_space
-            .locate(base_space, frame_state.predicted_display_time)
-            .unwrap();
+        let target_ray_origin = pose_for(
+            &self.action_aim_pose,
+            session,
+            frame_state,
+            base_space,
+            identity_pose,
+        );
 
-        let pose_valid = location
-            .location_flags
-            .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
-        let target_ray_origin = if pose_valid {
-            Some(super::transform(&location.pose))
-        } else {
-            None
-        };
+        let grip_origin = pose_for(
+            &self.action_grip_pose,
+            session,
+            frame_state,
+            base_space,
+            identity_pose,
+        );
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
 
@@ -93,9 +115,32 @@ impl OpenXRInput {
             target_ray_origin,
             id: self.id,
             pressed: click.is_active && click.current_state,
-            grip_origin: None,
+            grip_origin,
         };
 
         (input_frame, click)
+    }
+}
+
+fn pose_for(
+    action: &Action<Posef>,
+    session: &Session<D3D11>,
+    frame_state: &FrameState,
+    base_space: &Space,
+    identity_pose: Posef,
+) -> Option<RigidTransform3D<f32, Input, Native>> {
+    let action_space = action
+        .create_space(session.clone(), Path::NULL, identity_pose)
+        .unwrap();
+    let location = action_space
+        .locate(base_space, frame_state.predicted_display_time)
+        .unwrap();
+    let pose_valid = location
+        .location_flags
+        .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
+    if pose_valid {
+        Some(super::transform(&location.pose))
+    } else {
+        None
     }
 }
