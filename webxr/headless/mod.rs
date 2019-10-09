@@ -146,6 +146,8 @@ impl Device for HeadlessDevice {
             .map(|i| InputFrame {
                 id: i.source.id,
                 target_ray_origin: Some(i.pointer),
+                grip_origin: None,
+                pressed: false,
             })
             .collect();
 

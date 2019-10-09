@@ -507,6 +507,8 @@ impl GoogleVRDevice {
             vec![InputFrame {
                 target_ray_origin: Some(i.state()),
                 id: InputId(0),
+                grip_origin: None,
+                pressed: false,
             }]
         } else {
             vec![]
@@ -569,6 +571,7 @@ impl Device for GoogleVRDevice {
                 handedness: i.handedness(),
                 id: InputId(0),
                 target_ray_mode: TargetRayMode::TrackedPointer,
+                supports_grip: false,
             }]
         } else {
             vec![]
