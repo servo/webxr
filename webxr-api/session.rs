@@ -42,6 +42,15 @@ pub enum SessionMode {
     ImmersiveAR,
 }
 
+/// https://immersive-web.github.io/webxr-ar-module/#xrenvironmentblendmode-enum
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum EnvironmentBlendMode {
+    Opaque,
+    AlphaBlend,
+    Additive,
+}
+
 /// https://www.w3.org/TR/hr-time/#dom-domhighrestimestamp
 pub type HighResTimeStamp = f64;
 
@@ -77,6 +86,7 @@ pub struct Session {
     views: Views,
     resolution: Size2D<i32, Viewport>,
     sender: Sender<SessionMsg>,
+    environment_blend_mode: EnvironmentBlendMode,
     initial_inputs: Vec<InputSource>,
 }
 
@@ -91,6 +101,10 @@ impl Session {
 
     pub fn views(&self) -> Views {
         self.views.clone()
+    }
+
+    pub fn environment_blend_mode(&self) -> EnvironmentBlendMode {
+        self.environment_blend_mode
     }
 
     pub fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
@@ -173,12 +187,14 @@ impl<D: Device> SessionThread<D> {
         let resolution = self.device.recommended_framebuffer_resolution();
         let sender = self.sender.clone();
         let initial_inputs = self.device.initial_inputs();
+        let environment_blend_mode = self.device.environment_blend_mode();
         Session {
             floor_transform,
             views,
             resolution,
             sender,
             initial_inputs,
+            environment_blend_mode,
         }
     }
 
