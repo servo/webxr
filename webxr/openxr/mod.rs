@@ -20,6 +20,7 @@ use openxr::{
 };
 use std::rc::Rc;
 use std::{mem, ptr};
+use webxr_api;
 use webxr_api::Device;
 use webxr_api::Discovery;
 use webxr_api::Error;
@@ -673,6 +674,10 @@ impl Device for OpenXrDevice {
 
     fn update_clip_planes(&mut self, near: f32, far: f32) {
         self.clip_planes.update(near, far);
+    }
+
+    fn environment_blend_mode(&self) -> webxr_api::EnvironmentBlendMode {
+        webxr_api::EnvironmentBlendMode::Additive
     }
 }
 

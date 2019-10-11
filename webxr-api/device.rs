@@ -4,6 +4,7 @@
 
 //! Traits to be implemented by backends
 
+use crate::EnvironmentBlendMode;
 use crate::Error;
 use crate::Event;
 use crate::Floor;
@@ -75,6 +76,11 @@ pub trait Device: 'static {
     fn set_quitter(&mut self, quitter: Quitter);
 
     fn update_clip_planes(&mut self, near: f32, far: f32);
+
+    fn environment_blend_mode(&self) -> EnvironmentBlendMode {
+        // for VR devices, override for AR
+        EnvironmentBlendMode::Opaque
+    }
 }
 
 impl Discovery for Box<dyn Discovery> {
