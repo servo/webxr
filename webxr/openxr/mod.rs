@@ -69,10 +69,10 @@ impl OpenXrDiscovery {
 fn create_instance() -> Result<Instance, String> {
     let entry = Entry::load().map_err(|e| format!("{:?}", e))?;
     let app_info = ApplicationInfo {
-        application_name: "webvr",
+        application_name: "firefox.reality",
         application_version: 1,
-
-        ..Default::default()
+        engine_name: "servo",
+        engine_version: 1,
     };
 
     let exts = ExtensionSet {
