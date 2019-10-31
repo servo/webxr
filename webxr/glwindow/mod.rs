@@ -17,7 +17,6 @@ use euclid::Vector3D;
 
 use gleam::gl;
 use gleam::gl::GLsizei;
-use gleam::gl::GLsync;
 use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
@@ -25,6 +24,10 @@ use glutin::EventsLoop;
 use glutin::EventsLoopClosed;
 
 use std::rc::Rc;
+
+use surfman::platform::generic::universal::context::Context;
+use surfman::platform::generic::universal::device::Device as SurfmanDevice;
+use surfman::platform::generic::universal::surface::Surface;
 
 use webxr_api::Device;
 use webxr_api::Discovery;
@@ -87,6 +90,8 @@ impl Discovery for GlWindowDiscovery {
 }
 
 pub struct GlWindowDevice {
+    device: SurfmanDevice,
+    context: Context,
     gl: Rc<dyn Gl>,
     window: Rc<dyn GlWindow>,
     read_fbo: GLuint,
@@ -126,21 +131,16 @@ impl Device for GlWindowDevice {
         })
     }
 
-    fn render_animation_frame(
-        &mut self,
-        texture_id: u32,
-        size: UntypedSize2D<i32>,
-        sync: Option<GLsync>,
-    ) {
-        // Perform the sync while the old window's GL context is active,
-        // or it won't actually do anything - the XR window's GL context
-        // doesn't recognize the sync object and triggers GL_INVALID_OPERATION.
-        if let Some(sync) = sync {
-            self.gl.wait_sync(sync, 0, gl::TIMEOUT_IGNORED);
-            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-        }
-
+    fn render_animation_frame(&mut self, surface: Surface) -> Surface {
         self.window.make_current();
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        let size = surface.size();
+        let surface_texture = self
+            .device
+            .create_surface_texture(&mut self.context, surface)
+            .unwrap();
+        let texture_id = surface_texture.gl_texture();
 
         let width = size.width as GLsizei;
         let height = size.height as GLsizei;
@@ -157,13 +157,14 @@ impl Device for GlWindowDevice {
         self.gl.framebuffer_texture_2d(
             gl::READ_FRAMEBUFFER,
             gl::COLOR_ATTACHMENT0,
-            gl::TEXTURE_2D,
+            self.device.surface_gl_texture_target(),
             texture_id,
             0,
         );
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
         self.gl.viewport(0, 0, width, height);
+
         self.gl.blit_framebuffer(
             0,
             0,
@@ -177,6 +178,10 @@ impl Device for GlWindowDevice {
             gl::NEAREST,
         );
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        self.device
+            .destroy_surface_texture(&mut self.context, surface_texture)
+            .unwrap()
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -202,15 +207,36 @@ impl Device for GlWindowDevice {
     }
 }
 
+impl Drop for GlWindowDevice {
+    fn drop(&mut self) {
+        let _ = self.device.destroy_context(&mut self.context);
+    }
+}
+
 impl GlWindowDevice {
     fn new(gl: Rc<dyn Gl>, window: Rc<dyn GlWindow>) -> Result<GlWindowDevice, Error> {
         window.make_current();
+
+        // Slightly annoyingly the API fpr bootstrapping surfman is different
+        // depending on whether ANGLE is being used or not, since ANGLE
+        // provides both the software and hardware contexts.
+        // This will get fixed with a new API for bootstrapping surfman.
+        // https://github.com/pcwalton/surfman/issues/30
+        #[cfg(target_os = "windows")]
+        let (device, context) =
+            unsafe { SurfmanDevice::from_current_context() }.or(Err(Error::NoMatchingDevice))?;
+        #[cfg(not(target_os = "windows"))]
+        let (device, context) = unsafe { SurfmanDevice::from_current_hardware_context() }
+            .or(Err(Error::NoMatchingDevice))?;
+
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
         Ok(GlWindowDevice {
             gl,
             window,
+            device,
+            context,
             read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),

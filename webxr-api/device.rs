@@ -19,11 +19,10 @@ use crate::SessionMode;
 use crate::Viewport;
 use crate::Views;
 
-use euclid::default::Size2D as UntypedSize2D;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
-use gleam::gl::GLsync;
+use surfman::platform::generic::universal::surface::Surface;
 
 /// A trait for discovering XR devices
 pub trait Discovery: 'static {
@@ -53,15 +52,10 @@ pub trait Device: 'static {
     /// and return the information for it.
     fn wait_for_animation_frame(&mut self) -> Option<Frame>;
 
-    /// This method should render a GL texture to the device.
-    /// While this method is being called, the device has unique access
-    /// to the texture. The texture should be sync'd using glWaitSync before being used.
-    fn render_animation_frame(
-        &mut self,
-        texture_id: u32,
-        size: UntypedSize2D<i32>,
-        sync: Option<GLsync>,
-    );
+    /// This method should render a surface to the device.
+    /// While this method is being called, the device has ownership
+    /// of the surface, and should return it afterwards.
+    fn render_animation_frame(&mut self, surface: Surface) -> Surface;
 
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism

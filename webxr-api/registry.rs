@@ -13,9 +13,11 @@ use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
-use crate::WebGLExternalImageApi;
+use crate::SwapChainId;
 
 use log::warn;
+
+use surfman_chains::SwapChains;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -31,7 +33,7 @@ pub struct MainThreadRegistry {
     discoveries: Vec<Box<dyn Discovery>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
     mocks: Vec<Box<dyn MockDiscovery>>,
-    webgl: Option<Box<dyn WebGLExternalImageApi>>,
+    swap_chains: Option<SwapChains<SwapChainId>>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
@@ -111,13 +113,13 @@ impl MainThreadRegistry {
         let discoveries = Vec::new();
         let sessions = Vec::new();
         let mocks = Vec::new();
+        let swap_chains = None;
         let waker = MainThreadWakerImpl::new(waker)?;
-        let webgl = None;
         Ok(MainThreadRegistry {
             discoveries,
             sessions,
             mocks,
-            webgl,
+            swap_chains,
             sender,
             receiver,
             waker,
@@ -129,10 +131,6 @@ impl MainThreadRegistry {
             sender: self.sender.clone(),
             waker: self.waker.clone(),
         }
-    }
-
-    pub fn set_webgl(&mut self, webgl: Box<dyn WebGLExternalImageApi>) {
-        self.webgl = Some(webgl);
     }
 
     pub fn register<D: Discovery>(&mut self, discovery: D) {
@@ -175,6 +173,10 @@ impl MainThreadRegistry {
         }
     }
 
+    pub fn set_swap_chains(&mut self, swap_chains: SwapChains<SwapChainId>) {
+        self.swap_chains = Some(swap_chains);
+    }
+
     fn supports_session(&mut self, mode: SessionMode) -> Result<(), Error> {
         for discovery in &self.discoveries {
             if discovery.supports_session(mode) {
@@ -185,10 +187,10 @@ impl MainThreadRegistry {
     }
 
     fn request_session(&mut self, mode: SessionMode) -> Result<Session, Error> {
-        let webgl = self.webgl.as_ref().ok_or(Error::NoMatchingDevice)?;
+        let swap_chains = self.swap_chains.as_mut().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
             if discovery.supports_session(mode) {
-                let xr = SessionBuilder::new(&**webgl, &mut self.sessions);
+                let xr = SessionBuilder::new(swap_chains, &mut self.sessions);
                 match discovery.request_session(mode, xr) {
                     Ok(session) => return Ok(session),
                     Err(err) => warn!("XR device error {:?}", err),
