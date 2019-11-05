@@ -562,7 +562,7 @@ impl Device for GoogleVRDevice {
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
         let (device, mut context) = self.surfman.take().unwrap();
-        let texture_size = surface.size();
+        let texture_size = device.surface_info(&surface).size;
         let surface_texture = device
             .create_surface_texture(&mut context, surface)
             .unwrap();
