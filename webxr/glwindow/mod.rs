@@ -135,7 +135,7 @@ impl Device for GlWindowDevice {
         self.window.make_current();
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        let size = surface.size();
+        let size = self.device.surface_info(&surface).size;
         let surface_texture = self
             .device
             .create_surface_texture(&mut self.context, surface)

@@ -415,7 +415,7 @@ impl Device for MagicLeapDevice {
             .make_context_current(&self.surfman_context);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        let size = surface.size();
+        let size = self.surfman_device.surface_info(&surface).size;
         let surface_texture = self
             .surfman_device
             .create_surface_texture(&mut self.surfman_context, surface)

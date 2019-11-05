@@ -451,7 +451,7 @@ impl Device for OpenXrDevice {
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
         let (device, mut context) = self.surfman.take().unwrap();
-        let size = surface.size();
+        let size = device.surface_info(&surface).size;
         let surface_texture = device
             .create_surface_texture(&mut context, surface)
             .unwrap();
