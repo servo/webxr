@@ -23,8 +23,8 @@ ipc = ["serde", "ipc-channel", "euclid/serde"]
 
 [dependencies]
 euclid = "0.20"
-surfman = { git = "https://github.com/pcwalton/surfman", features = ["sm-osmesa"] }
-surfman-chains = { git = "https://github.com/asajeffrey/surfman-chains" }
+surfman = { version = "0.1", features = ["sm-osmesa"] }
+surfman-chains = "0.1"
 ipc-channel = { version = "0.12", optional = true }
 log = "0.4"
 serde = { version = "1.0", optional = true }
