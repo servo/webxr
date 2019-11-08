@@ -618,8 +618,8 @@ impl Device for OpenXrDevice {
                                     }),
                             ),
                         openxr::CompositionLayerProjectionView::new()
-                            .pose(self.openxr_views[0].pose)
-                            .fov(self.openxr_views[0].fov)
+                            .pose(self.openxr_views[1].pose)
+                            .fov(self.openxr_views[1].fov)
                             .sub_image(
                                 openxr::SwapchainSubImage::new()
                                     .swapchain(&self.right_swapchain)
