@@ -331,11 +331,6 @@ impl OpenXrDevice {
             let event = self.instance.poll_event(&mut buffer).unwrap();
             match event {
                 Some(SessionStateChanged(session_change)) => match session_change.state() {
-                    openxr::SessionState::STOPPING => {
-                        self.events.callback(Event::SessionEnd);
-                        self.session.end().unwrap();
-                        return false;
-                    }
                     openxr::SessionState::EXITING | openxr::SessionState::LOSS_PENDING => {
                         break;
                     }
