@@ -37,7 +37,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use surfman::platform::generic::universal::surface::Surface;
+use crate::Surface;
+use crate::SwapChains;
 
 pub struct HeadlessMockDiscovery {}
 
@@ -68,11 +69,12 @@ struct HeadlessDeviceData {
 }
 
 impl MockDiscovery for HeadlessMockDiscovery {
+    type SwapChains = SwapChains;
     fn simulate_device_connection(
         &mut self,
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
-    ) -> Result<Box<dyn Discovery>, Error> {
+    ) -> Result<Box<dyn Discovery<SwapChains = SwapChains>>, Error> {
         let viewer_origin = init.viewer_origin.clone();
         let floor_transform = init.floor_origin.inverse();
         let views = init.views.clone();
@@ -108,7 +110,12 @@ fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceDat
 }
 
 impl Discovery for HeadlessDiscovery {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    type SwapChains = SwapChains;
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
@@ -122,6 +129,8 @@ impl Discovery for HeadlessDiscovery {
 }
 
 impl Device for HeadlessDevice {
+    type SwapChains = SwapChains;
+
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         self.data.lock().unwrap().floor_transform.clone()
     }

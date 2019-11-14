@@ -12,6 +12,7 @@ use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
+use crate::SwapChains;
 use crate::TargetRayMode;
 use crate::Viewer;
 use crate::Views;
@@ -23,11 +24,12 @@ use serde::{Deserialize, Serialize};
 
 /// A trait for discovering mock XR devices
 pub trait MockDiscovery: 'static {
+    type SwapChains: SwapChains;
     fn simulate_device_connection(
         &mut self,
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
-    ) -> Result<Box<dyn Discovery>, Error>;
+    ) -> Result<Box<dyn Discovery<SwapChains = Self::SwapChains>>, Error>;
 }
 
 #[derive(Clone, Debug)]

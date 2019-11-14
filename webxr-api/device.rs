@@ -16,22 +16,28 @@ use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
+use crate::SwapChains;
 use crate::Viewport;
 use crate::Views;
 
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
-use surfman::platform::generic::universal::surface::Surface;
-
 /// A trait for discovering XR devices
 pub trait Discovery: 'static {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error>;
+    type SwapChains: SwapChains;
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<Self::SwapChains>,
+    ) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
 }
 
 /// A trait for using an XR device
 pub trait Device: 'static {
+    type SwapChains: SwapChains;
+
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor>;
 
@@ -55,7 +61,10 @@ pub trait Device: 'static {
     /// This method should render a surface to the device.
     /// While this method is being called, the device has ownership
     /// of the surface, and should return it afterwards.
-    fn render_animation_frame(&mut self, surface: Surface) -> Surface;
+    fn render_animation_frame(
+        &mut self,
+        surface: <Self::SwapChains as SwapChains>::Surface,
+    ) -> <Self::SwapChains as SwapChains>::Surface;
 
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism
@@ -77,8 +86,13 @@ pub trait Device: 'static {
     }
 }
 
-impl Discovery for Box<dyn Discovery> {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+impl<S: SwapChains + 'static> Discovery for Box<dyn Discovery<SwapChains = S>> {
+    type SwapChains = S;
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<S>,
+    ) -> Result<Session, Error> {
         (&mut **self).request_session(mode, xr)
     }
 

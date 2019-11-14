@@ -82,6 +82,22 @@ impl SwapChainId {
 
 static NEXT_SWAP_CHAIN_ID: AtomicUsize = AtomicUsize::new(0);
 
+pub trait SwapChain {
+    type Surface: Surface;
+
+    fn take_surface(&self) -> Option<Self::Surface>;
+    fn recycle_surface(&self, surface: Self::Surface);
+}
+
+pub trait SwapChains: Clone + Send {
+    type SwapChain: SwapChain<Surface = Self::Surface>;
+    type Surface: Surface;
+
+    fn get(&self, id: SwapChainId) -> Option<Self::SwapChain>;
+}
+
+pub trait Surface {}
+
 #[cfg(feature = "ipc")]
 use std::thread;
 

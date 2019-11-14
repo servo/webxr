@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::{Surface, SwapChains};
 use webxr_api::Device;
 use webxr_api::Error;
 use webxr_api::Event;
@@ -46,7 +47,6 @@ use super::input::GoogleVRController;
 
 use surfman::platform::generic::universal::context::Context as SurfmanContext;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
 
 #[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
@@ -529,6 +529,8 @@ impl GoogleVRDevice {
 }
 
 impl Device for GoogleVRDevice {
+    type SwapChains = SwapChains;
+
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         // GoogleVR doesn't know about the floor
         // XXXManishearth perhaps we should report a guesstimate value here
@@ -564,7 +566,7 @@ impl Device for GoogleVRDevice {
         let (device, mut context) = self.surfman.take().unwrap();
         let texture_size = device.surface_info(&surface).size;
         let surface_texture = device
-            .create_surface_texture(&mut context, surface)
+            .create_surface_texture(&mut context, surface.0)
             .unwrap();
         let texture_id = surface_texture.gl_texture();
         let texture_target = device.surface_gl_texture_target();
@@ -572,6 +574,7 @@ impl Device for GoogleVRDevice {
         self.submit_frame();
         let surface = device
             .destroy_surface_texture(&mut context, surface_texture)
+            .map(Surface)
             .unwrap();
         self.surfman = Some((device, context));
         surface

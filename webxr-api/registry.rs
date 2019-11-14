@@ -13,11 +13,9 @@ use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionMode;
-use crate::SwapChainId;
+use crate::SwapChains;
 
 use log::warn;
-
-use surfman_chains::SwapChains;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -29,11 +27,11 @@ pub struct Registry {
     waker: MainThreadWakerImpl,
 }
 
-pub struct MainThreadRegistry {
-    discoveries: Vec<Box<dyn Discovery>>,
+pub struct MainThreadRegistry<S: SwapChains> {
+    discoveries: Vec<Box<dyn Discovery<SwapChains = S>>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
-    mocks: Vec<Box<dyn MockDiscovery>>,
-    swap_chains: Option<SwapChains<SwapChainId>>,
+    mocks: Vec<Box<dyn MockDiscovery<SwapChains = S>>>,
+    swap_chains: Option<S>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
@@ -107,8 +105,8 @@ impl Registry {
     }
 }
 
-impl MainThreadRegistry {
-    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadRegistry, Error> {
+impl<Swap: SwapChains + 'static> MainThreadRegistry<Swap> {
+    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadRegistry<Swap>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let sessions = Vec::new();
@@ -133,11 +131,11 @@ impl MainThreadRegistry {
         }
     }
 
-    pub fn register<D: Discovery>(&mut self, discovery: D) {
+    pub fn register<D: Discovery<SwapChains = Swap>>(&mut self, discovery: D) {
         self.discoveries.push(Box::new(discovery));
     }
 
-    pub fn register_mock<D: MockDiscovery>(&mut self, discovery: D) {
+    pub fn register_mock<D: MockDiscovery<SwapChains = Swap>>(&mut self, discovery: D) {
         self.mocks.push(Box::new(discovery));
     }
 
@@ -173,7 +171,7 @@ impl MainThreadRegistry {
         }
     }
 
-    pub fn set_swap_chains(&mut self, swap_chains: SwapChains<SwapChainId>) {
+    pub fn set_swap_chains(&mut self, swap_chains: Swap) {
         self.swap_chains = Some(swap_chains);
     }
 

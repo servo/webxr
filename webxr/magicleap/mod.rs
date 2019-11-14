@@ -6,6 +6,7 @@
 
 use crate::egl;
 use crate::egl::types::EGLContext;
+use crate::{Surface, SwapChains};
 
 use euclid::default::Size2D as UntypedSize2D;
 use euclid::Point2D;
@@ -61,7 +62,6 @@ use std::time::Duration;
 
 use surfman::platform::generic::universal::context::Context as SurfmanContext;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
 
 use webxr_api::Device;
 use webxr_api::Discovery;
@@ -112,11 +112,17 @@ impl MagicLeapDiscovery {
 }
 
 impl Discovery for MagicLeapDiscovery {
+    type SwapChains = SwapChains;
+
     fn supports_session(&self, mode: SessionMode) -> bool {
         mode == SessionMode::ImmersiveVR || mode == SessionMode::ImmersiveAR
     }
 
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
@@ -391,6 +397,8 @@ impl MagicLeapDevice {
 }
 
 impl Device for MagicLeapDevice {
+    type SwapChains = SwapChains;
+
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         if let Err(err) = self.start_frame() {
             error!("Failed to start frame ({:?}).", err);
@@ -418,7 +426,7 @@ impl Device for MagicLeapDevice {
         let size = self.surfman_device.surface_info(&surface).size;
         let surface_texture = self
             .surfman_device
-            .create_surface_texture(&mut self.surfman_context, surface)
+            .create_surface_texture(&mut self.surfman_context, surface.0)
             .unwrap();
         let texture_id = surface_texture.gl_texture();
 
@@ -428,6 +436,7 @@ impl Device for MagicLeapDevice {
 
         self.surfman_device
             .destroy_surface_texture(&mut self.surfman_context, surface_texture)
+            .map(Surface)
             .unwrap()
     }
 

@@ -1,4 +1,5 @@
 use crate::utils::ClipPlanes;
+use crate::{Surface, SwapChains};
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
@@ -20,7 +21,6 @@ use openxr::{
 use std::rc::Rc;
 use surfman::platform::generic::universal::context::Context as SurfmanContext;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
 use webxr_api;
 use webxr_api::Device;
 use webxr_api::Discovery;
@@ -97,10 +97,12 @@ fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
 }
 
 impl Discovery for OpenXrDiscovery {
+    type SwapChains = SwapChains;
+
     fn request_session(
         &mut self,
         mode: SessionMode,
-        xr: SessionBuilder,
+        xr: SessionBuilder<SwapChains>,
     ) -> Result<WebXrSession, Error> {
         let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
         if self.supports_session(mode) {
@@ -355,6 +357,8 @@ impl OpenXrDevice {
 }
 
 impl Device for OpenXrDevice {
+    type SwapChains = SwapChains;
+
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
         RigidTransform3D::from_translation(translation)
@@ -463,7 +467,7 @@ impl Device for OpenXrDevice {
         let device = &mut self.surfman.0;
         let context = &mut self.surfman.1;
         let size = device.surface_info(&surface).size;
-        let surface_texture = device.create_surface_texture(context, surface).unwrap();
+        let surface_texture = device.create_surface_texture(context, surface.0).unwrap();
         let texture_id = surface_texture.gl_texture();
 
         let mut value = [0];
@@ -630,6 +634,7 @@ impl Device for OpenXrDevice {
 
         let surface = device
             .destroy_surface_texture(context, surface_texture)
+            .map(Surface)
             .unwrap();
         let left_surface = device
             .destroy_surface_texture(context, left_surface_texture)

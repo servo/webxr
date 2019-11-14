@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::utils::ClipPlanes;
+use crate::{Surface, SwapChains};
 use euclid::default::Size2D as UntypedSize2D;
 use euclid::Angle;
 use euclid::Point2D;
@@ -27,7 +28,6 @@ use std::rc::Rc;
 
 use surfman::platform::generic::universal::context::Context;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
 
 use webxr_api::Device;
 use webxr_api::Discovery;
@@ -74,7 +74,13 @@ impl GlWindowDiscovery {
 }
 
 impl Discovery for GlWindowDiscovery {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    type SwapChains = SwapChains;
+
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         if self.supports_session(mode) {
             let gl = self.gl.clone();
             let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
@@ -100,6 +106,8 @@ pub struct GlWindowDevice {
 }
 
 impl Device for GlWindowDevice {
+    type SwapChains = SwapChains;
+
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
         RigidTransform3D::from_translation(translation)
@@ -138,7 +146,7 @@ impl Device for GlWindowDevice {
         let size = self.device.surface_info(&surface).size;
         let surface_texture = self
             .device
-            .create_surface_texture(&mut self.context, surface)
+            .create_surface_texture(&mut self.context, surface.0)
             .unwrap();
         let texture_id = surface_texture.gl_texture();
 
@@ -181,6 +189,7 @@ impl Device for GlWindowDevice {
 
         self.device
             .destroy_surface_texture(&mut self.context, surface_texture)
+            .map(Surface)
             .unwrap()
     }
 

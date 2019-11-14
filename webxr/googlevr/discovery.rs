@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::SwapChains;
 use webxr_api::Discovery;
 use webxr_api::Error;
 use webxr_api::Session;
@@ -66,8 +67,14 @@ impl GoogleVRDiscovery {
 }
 
 impl Discovery for GoogleVRDiscovery {
+    type SwapChains = SwapChains;
+
     #[cfg(target_os = "android")]
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         let (ctx, controller_ctx, java_class, java_object);
         unsafe {
             ctx = SendPtr::new(self.ctx);
@@ -83,7 +90,11 @@ impl Discovery for GoogleVRDiscovery {
     }
 
     #[cfg(not(target_os = "android"))]
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         let (ctx, controller_ctx);
         unsafe {
             ctx = SendPtr::new(self.ctx);

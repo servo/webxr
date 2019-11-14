@@ -12,7 +12,9 @@ use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
+use crate::SwapChain;
 use crate::SwapChainId;
+use crate::SwapChains;
 use crate::Viewport;
 use crate::Views;
 
@@ -21,9 +23,6 @@ use euclid::Size2D;
 
 use std::thread;
 use std::time::Duration;
-
-use surfman_chains::SwapChain;
-use surfman_chains::SwapChains;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -141,21 +140,18 @@ impl Session {
 }
 
 /// For devices that want to do their own thread management, the `SessionThread` type is exposed.
-pub struct SessionThread<D> {
+pub struct SessionThread<D: Device> {
     receiver: Receiver<SessionMsg>,
     sender: Sender<SessionMsg>,
-    swap_chain: Option<SwapChain>,
-    swap_chains: SwapChains<SwapChainId>,
+    swap_chain: Option<<D::SwapChains as SwapChains>::SwapChain>,
+    swap_chains: D::SwapChains,
     timestamp: HighResTimeStamp,
     running: bool,
     device: D,
 }
 
 impl<D: Device> SessionThread<D> {
-    pub fn new(
-        mut device: D,
-        swap_chains: SwapChains<SwapChainId>,
-    ) -> Result<SessionThread<D>, Error> {
+    pub fn new(mut device: D, swap_chains: D::SwapChains) -> Result<SessionThread<D>, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         device.set_quitter(Quitter {
             sender: sender.clone(),
@@ -265,16 +261,16 @@ impl<D: Device> MainThreadSession for SessionThread<D> {
 }
 
 /// A type for building XR sessions
-pub struct SessionBuilder<'a> {
-    swap_chains: &'a SwapChains<SwapChainId>,
+pub struct SessionBuilder<'a, S: SwapChains> {
+    swap_chains: &'a S,
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
 }
 
-impl<'a> SessionBuilder<'a> {
+impl<'a, S: SwapChains + 'static> SessionBuilder<'a, S> {
     pub(crate) fn new(
-        swap_chains: &'a SwapChains<SwapChainId>,
+        swap_chains: &'a S,
         sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
-    ) -> SessionBuilder<'a> {
+    ) -> SessionBuilder<'a, S> {
         SessionBuilder {
             swap_chains,
             sessions,
@@ -285,7 +281,7 @@ impl<'a> SessionBuilder<'a> {
     pub fn spawn<D, F>(self, factory: F) -> Result<Session, Error>
     where
         F: 'static + FnOnce() -> Result<D, Error> + Send,
-        D: Device,
+        D: Device<SwapChains = S>,
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
         let swap_chains = self.swap_chains.clone();
@@ -308,7 +304,7 @@ impl<'a> SessionBuilder<'a> {
     pub fn run_on_main_thread<D, F>(self, factory: F) -> Result<Session, Error>
     where
         F: 'static + FnOnce() -> Result<D, Error>,
-        D: Device,
+        D: Device<SwapChains = S>,
     {
         let device = factory()?;
         let swap_chains = self.swap_chains.clone();
