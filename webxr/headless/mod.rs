@@ -27,13 +27,8 @@ use webxr_api::SessionMode;
 use webxr_api::Viewer;
 use webxr_api::Views;
 
-use euclid::default::Size2D;
 use euclid::RigidTransform3D;
 
-use gleam::gl;
-use gleam::gl::GLuint;
-
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
