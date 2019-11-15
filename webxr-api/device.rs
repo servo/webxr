@@ -22,16 +22,18 @@ use crate::Views;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
-use surfman::platform::generic::universal::surface::Surface;
-
 /// A trait for discovering XR devices
-pub trait Discovery: 'static {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error>;
+pub trait DiscoveryAPI<SwapChains>: 'static {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
 }
 
 /// A trait for using an XR device
-pub trait Device: 'static {
+pub trait DeviceAPI<Surface>: 'static {
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor>;
 
@@ -77,8 +79,12 @@ pub trait Device: 'static {
     }
 }
 
-impl Discovery for Box<dyn Discovery> {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+impl<SwapChains: 'static> DiscoveryAPI<SwapChains> for Box<dyn DiscoveryAPI<SwapChains>> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        xr: SessionBuilder<SwapChains>,
+    ) -> Result<Session, Error> {
         (&mut **self).request_session(mode, xr)
     }
 

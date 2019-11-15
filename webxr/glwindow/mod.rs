@@ -3,6 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::utils::ClipPlanes;
+use crate::SessionBuilder;
+use crate::SwapChains;
+
 use euclid::default::Size2D as UntypedSize2D;
 use euclid::Angle;
 use euclid::Point2D;
@@ -29,8 +32,8 @@ use surfman::platform::generic::universal::context::Context;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
 
-use webxr_api::Device;
-use webxr_api::Discovery;
+use webxr_api::DeviceAPI;
+use webxr_api::DiscoveryAPI;
 use webxr_api::Display;
 use webxr_api::Error;
 use webxr_api::Event;
@@ -43,7 +46,6 @@ use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Sender;
 use webxr_api::Session;
-use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Views;
@@ -73,7 +75,7 @@ impl GlWindowDiscovery {
     }
 }
 
-impl Discovery for GlWindowDiscovery {
+impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
         if self.supports_session(mode) {
             let gl = self.gl.clone();
@@ -99,7 +101,7 @@ pub struct GlWindowDevice {
     clip_planes: ClipPlanes,
 }
 
-impl Device for GlWindowDevice {
+impl DeviceAPI<Surface> for GlWindowDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
         RigidTransform3D::from_translation(translation)

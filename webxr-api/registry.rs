@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::Discovery;
+use crate::DiscoveryAPI;
 use crate::Error;
 use crate::MainThreadSession;
 use crate::MockDeviceInit;
 use crate::MockDeviceMsg;
-use crate::MockDiscovery;
+use crate::MockDiscoveryAPI;
 use crate::Receiver;
 use crate::Sender;
 use crate::Session;
@@ -17,7 +17,7 @@ use crate::SwapChainId;
 
 use log::warn;
 
-use surfman_chains::SwapChains;
+use surfman_chains_api::SwapChainsAPI;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -29,11 +29,11 @@ pub struct Registry {
     waker: MainThreadWakerImpl,
 }
 
-pub struct MainThreadRegistry {
-    discoveries: Vec<Box<dyn Discovery>>,
+pub struct MainThreadRegistry<SwapChains> {
+    discoveries: Vec<Box<dyn DiscoveryAPI<SwapChains>>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
-    mocks: Vec<Box<dyn MockDiscovery>>,
-    swap_chains: Option<SwapChains<SwapChainId>>,
+    mocks: Vec<Box<dyn MockDiscoveryAPI<SwapChains>>>,
+    swap_chains: Option<SwapChains>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
@@ -107,8 +107,11 @@ impl Registry {
     }
 }
 
-impl MainThreadRegistry {
-    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadRegistry, Error> {
+impl<SwapChains> MainThreadRegistry<SwapChains>
+where
+    SwapChains: SwapChainsAPI<SwapChainId>,
+{
+    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<Self, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let sessions = Vec::new();
@@ -133,11 +136,11 @@ impl MainThreadRegistry {
         }
     }
 
-    pub fn register<D: Discovery>(&mut self, discovery: D) {
+    pub fn register<D: DiscoveryAPI<SwapChains>>(&mut self, discovery: D) {
         self.discoveries.push(Box::new(discovery));
     }
 
-    pub fn register_mock<D: MockDiscovery>(&mut self, discovery: D) {
+    pub fn register_mock<D: MockDiscoveryAPI<SwapChains>>(&mut self, discovery: D) {
         self.mocks.push(Box::new(discovery));
     }
 
@@ -173,7 +176,7 @@ impl MainThreadRegistry {
         }
     }
 
-    pub fn set_swap_chains(&mut self, swap_chains: SwapChains<SwapChainId>) {
+    pub fn set_swap_chains(&mut self, swap_chains: SwapChains) {
         self.swap_chains = Some(swap_chains);
     }
 
