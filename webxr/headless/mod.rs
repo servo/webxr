@@ -2,8 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use webxr_api::Device;
-use webxr_api::Discovery;
+use crate::SessionBuilder;
+use crate::SwapChains;
+
+use webxr_api::DeviceAPI;
+use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
@@ -15,14 +18,13 @@ use webxr_api::InputFrame;
 use webxr_api::InputSource;
 use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
-use webxr_api::MockDiscovery;
+use webxr_api::MockDiscoveryAPI;
 use webxr_api::MockInputMsg;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Receiver;
 use webxr_api::Sender;
 use webxr_api::Session;
-use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
 use webxr_api::Viewer;
 use webxr_api::Views;
@@ -62,12 +64,12 @@ struct HeadlessDeviceData {
     disconnected: bool,
 }
 
-impl MockDiscovery for HeadlessMockDiscovery {
+impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
     fn simulate_device_connection(
         &mut self,
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
-    ) -> Result<Box<dyn Discovery>, Error> {
+    ) -> Result<Box<dyn DiscoveryAPI<SwapChains>>, Error> {
         let viewer_origin = init.viewer_origin.clone();
         let floor_transform = init.floor_origin.inverse();
         let views = init.views.clone();
@@ -102,7 +104,7 @@ fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceDat
     }
 }
 
-impl Discovery for HeadlessDiscovery {
+impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
         if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
@@ -116,7 +118,7 @@ impl Discovery for HeadlessDiscovery {
     }
 }
 
-impl Device for HeadlessDevice {
+impl DeviceAPI<Surface> for HeadlessDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         self.data.lock().unwrap().floor_transform.clone()
     }

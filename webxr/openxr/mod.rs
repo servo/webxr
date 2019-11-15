@@ -1,4 +1,7 @@
 use crate::utils::ClipPlanes;
+use crate::SessionBuilder;
+use crate::SwapChains;
+
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
@@ -22,8 +25,8 @@ use surfman::platform::generic::universal::context::Context as SurfmanContext;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
 use webxr_api;
-use webxr_api::Device;
-use webxr_api::Discovery;
+use webxr_api::DeviceAPI;
+use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
@@ -37,7 +40,6 @@ use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
-use webxr_api::SessionBuilder;
 use webxr_api::SessionMode;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
@@ -96,7 +98,7 @@ fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
     panic!("No formats supported amongst {:?}", formats);
 }
 
-impl Discovery for OpenXrDiscovery {
+impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
     fn request_session(
         &mut self,
         mode: SessionMode,
@@ -354,7 +356,7 @@ impl OpenXrDevice {
     }
 }
 
-impl Device for OpenXrDevice {
+impl DeviceAPI<Surface> for OpenXrDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
         RigidTransform3D::from_translation(translation)

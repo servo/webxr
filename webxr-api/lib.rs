@@ -20,8 +20,8 @@ mod registry;
 mod session;
 mod view;
 
-pub use device::Device;
-pub use device::Discovery;
+pub use device::DeviceAPI;
+pub use device::DiscoveryAPI;
 
 pub use error::Error;
 
@@ -41,7 +41,7 @@ pub use input::TargetRayMode;
 
 pub use mock::MockDeviceInit;
 pub use mock::MockDeviceMsg;
-pub use mock::MockDiscovery;
+pub use mock::MockDiscoveryAPI;
 pub use mock::MockInputInit;
 pub use mock::MockInputMsg;
 

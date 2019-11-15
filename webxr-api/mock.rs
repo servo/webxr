@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::Discovery;
+use crate::DiscoveryAPI;
 use crate::Error;
 use crate::Floor;
 use crate::Handedness;
@@ -22,12 +22,12 @@ use euclid::RigidTransform3D;
 use serde::{Deserialize, Serialize};
 
 /// A trait for discovering mock XR devices
-pub trait MockDiscovery: 'static {
+pub trait MockDiscoveryAPI<SwapChains>: 'static {
     fn simulate_device_connection(
         &mut self,
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
-    ) -> Result<Box<dyn Discovery>, Error>;
+    ) -> Result<Box<dyn DiscoveryAPI<SwapChains>>, Error>;
 }
 
 #[derive(Clone, Debug)]

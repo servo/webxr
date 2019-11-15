@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use webxr_api::Device;
+use webxr_api::DeviceAPI;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
@@ -528,7 +528,7 @@ impl GoogleVRDevice {
     }
 }
 
-impl Device for GoogleVRDevice {
+impl DeviceAPI<Surface> for GoogleVRDevice {
     fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
         // GoogleVR doesn't know about the floor
         // XXXManishearth perhaps we should report a guesstimate value here
