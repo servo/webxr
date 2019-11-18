@@ -59,6 +59,7 @@ pub trait GlWindow {
     fn size(&self) -> UntypedSize2D<GLsizei>;
     fn new_window(&self) -> Result<Rc<dyn GlWindow>, ()>;
     fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit>;
+    fn get_translation(&self) -> Vector3D<f32, UnknownUnit>;
 }
 
 pub struct GlWindowDiscovery {
@@ -115,7 +116,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         self.window.swap_buffers();
-        let translation = Vector3D::new(0.0, 0.0, -5.0);
+        let translation = Vector3D::from_untyped(self.window.get_translation());
         let translation: RigidTransform3D<_, _, Native> =
             RigidTransform3D::from_translation(translation);
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
