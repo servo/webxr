@@ -19,6 +19,8 @@ use crate::Views;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
+use log::warn;
+
 use std::thread;
 use std::time::Duration;
 
@@ -147,6 +149,7 @@ pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
     swap_chain: Option<SwapChains::SwapChain>,
     swap_chains: SwapChains,
     timestamp: HighResTimeStamp,
+    current_frame: Option<Frame>,
     running: bool,
     device: Device,
 }
@@ -171,6 +174,7 @@ where
             swap_chain,
             swap_chains,
             timestamp,
+            current_frame: None,
             running,
         })
     }
@@ -215,14 +219,17 @@ where
             }
             SessionMsg::RequestAnimationFrame(dest) => {
                 let timestamp = self.timestamp;
-                match self.device.wait_for_animation_frame() {
-                    Some(frame) => {
-                        let _ = dest.send((timestamp, frame));
-                    }
-                    None => {
-                        return false;
-                    }
+                let frame = match self.current_frame.take() {
+                    Some(frame) => frame,
+                    None => match self.device.wait_for_animation_frame() {
+                        Some(frame) => frame,
+                        None => {
+                            warn!("Device stopped providing frames, exiting");
+                            return false;
+                        }
+                    },
                 };
+                let _ = dest.send((timestamp, frame));
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
@@ -232,6 +239,12 @@ where
                         let surface = self.device.render_animation_frame(surface);
                         swap_chain.recycle_surface(surface);
                     }
+                }
+                self.current_frame = self.device.wait_for_animation_frame();
+
+                if self.current_frame.is_none() {
+                    warn!("Device stopped providing frames, exiting");
+                    return false;
                 }
             }
             SessionMsg::Quit => {
