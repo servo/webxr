@@ -20,17 +20,37 @@ enum ClickState {
     Done,
 }
 
+const IDENTITY_POSE: Posef = Posef {
+    orientation: Quaternionf {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+        w: 1.,
+    },
+    position: Vector3f {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    },
+};
 pub struct OpenXRInput {
     id: InputId,
     action_aim_pose: Action<Posef>,
+    action_aim_space: Space,
     action_grip_pose: Action<Posef>,
+    action_grip_space: Space,
     action_click: Action<bool>,
     hand: &'static str,
     click_state: ClickState,
 }
 
 impl OpenXRInput {
-    pub fn new(id: InputId, hand: Handedness, action_set: &ActionSet) -> Self {
+    pub fn new(
+        id: InputId,
+        hand: Handedness,
+        action_set: &ActionSet,
+        session: &Session<D3D11>,
+    ) -> Self {
         let hand = match hand {
             Handedness::Right => "right",
             Handedness::Left => "left",
@@ -43,12 +63,18 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
+        let action_aim_space = action_aim_pose
+            .create_space(session.clone(), Path::NULL, IDENTITY_POSE)
+            .unwrap();
         let action_grip_pose: Action<Posef> = action_set
             .create_action(
                 &format!("{}_hand_grip", hand),
                 &format!("{} hand grip", hand),
                 &[],
             )
+            .unwrap();
+        let action_grip_space = action_grip_pose
+            .create_space(session.clone(), Path::NULL, IDENTITY_POSE)
             .unwrap();
         let action_click: Action<bool> = action_set
             .create_action(
@@ -60,7 +86,9 @@ impl OpenXRInput {
         Self {
             id,
             action_aim_pose,
+            action_aim_space,
             action_grip_pose,
+            action_grip_space,
             action_click,
             hand,
             click_state: ClickState::Done,
@@ -90,34 +118,9 @@ impl OpenXRInput {
         frame_state: &FrameState,
         base_space: &Space,
     ) -> (InputFrame, Option<SelectEvent>) {
-        let identity_pose = Posef {
-            orientation: Quaternionf {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-                w: 1.,
-            },
-            position: Vector3f {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-        };
-        let target_ray_origin = pose_for(
-            &self.action_aim_pose,
-            session,
-            frame_state,
-            base_space,
-            identity_pose,
-        );
+        let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
-        let grip_origin = pose_for(
-            &self.action_grip_pose,
-            session,
-            frame_state,
-            base_space,
-            identity_pose,
-        );
+        let grip_origin = pose_for(&self.action_grip_space, frame_state, base_space);
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
 
@@ -156,15 +159,10 @@ impl OpenXRInput {
 }
 
 fn pose_for(
-    action: &Action<Posef>,
-    session: &Session<D3D11>,
+    action_space: &Space,
     frame_state: &FrameState,
     base_space: &Space,
-    identity_pose: Posef,
 ) -> Option<RigidTransform3D<f32, Input, Native>> {
-    let action_space = action
-        .create_space(session.clone(), Path::NULL, identity_pose)
-        .unwrap();
     let location = action_space
         .locate(base_space, frame_state.predicted_display_time)
         .unwrap();

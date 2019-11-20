@@ -285,8 +285,8 @@ impl OpenXrDevice {
         // input
 
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
-        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set);
-        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set);
+        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
+        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
         let mut bindings = right_hand.get_bindings(&instance);
         bindings.extend(left_hand.get_bindings(&instance).into_iter());
         let path_controller = instance
