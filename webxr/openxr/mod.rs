@@ -449,12 +449,16 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         };
 
         if let Some(right_select) = right_select {
-            self.events
-                .callback(Event::Select(InputId(0), right_select, frame.clone()));
+            self.events.callback(Event::Select(
+                InputId(0),
+                false,
+                right_select,
+                frame.clone(),
+            ));
         }
         if let Some(left_select) = left_select {
             self.events
-                .callback(Event::Select(InputId(1), left_select, frame.clone()));
+                .callback(Event::Select(InputId(1), false, left_select, frame.clone()));
         }
 
         // todo use pose in input

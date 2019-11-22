@@ -164,6 +164,7 @@ impl OpenXRInput {
             target_ray_origin,
             id: self.id,
             pressed: is_active && click.current_state,
+            squeezed: false,
             grip_origin,
         };
 

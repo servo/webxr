@@ -20,7 +20,7 @@ pub enum Event {
     /// Session focused/blurred/etc
     VisibilityChange(Visibility),
     /// Selection started / ended
-    Select(InputId, SelectEvent, Frame),
+    Select(InputId, /* is_squeeze */ bool, SelectEvent, Frame),
 }
 
 #[derive(Copy, Clone, Debug)]

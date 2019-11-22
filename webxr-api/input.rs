@@ -43,6 +43,7 @@ pub struct InputFrame {
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub pressed: bool,
+    pub squeezed: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
