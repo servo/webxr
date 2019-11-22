@@ -43,6 +43,7 @@ pub struct InputFrame {
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub pressed: bool,
+    pub squeezed: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -54,4 +55,11 @@ pub enum SelectEvent {
     End,
     /// Selection ended *with* it being a contiguous select event
     Select,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum SelectKind {
+    Select,
+    Squeeze,
 }

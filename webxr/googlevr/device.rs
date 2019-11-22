@@ -521,6 +521,7 @@ impl GoogleVRDevice {
                 id: InputId(0),
                 grip_origin: None,
                 pressed: false,
+                squeezed: false,
             }]
         } else {
             vec![]

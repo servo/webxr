@@ -139,6 +139,7 @@ impl DeviceAPI<Surface> for HeadlessDevice {
                 target_ray_origin: Some(i.pointer),
                 grip_origin: None,
                 pressed: false,
+                squeezed: false,
             })
             .collect();
 

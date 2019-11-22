@@ -20,6 +20,40 @@ enum ClickState {
     Done,
 }
 
+impl ClickState {
+    fn update(
+        &mut self,
+        action: &Action<bool>,
+        session: &Session<D3D11>,
+    ) -> (/* is_active */ bool, Option<SelectEvent>) {
+        let click = action.state(session, Path::NULL).unwrap();
+
+        let select_event = if click.is_active {
+            match (click.current_state, *self) {
+                (true, ClickState::Done) => {
+                    *self = ClickState::Clicking;
+                    Some(SelectEvent::Start)
+                }
+                (false, ClickState::Clicking) => {
+                    *self = ClickState::Done;
+                    Some(SelectEvent::Select)
+                }
+                (false, ClickState::ClickingLost) => {
+                    *self = ClickState::Done;
+                    Some(SelectEvent::End)
+                }
+                _ => None,
+            }
+        } else if *self == ClickState::Clicking {
+            *self = ClickState::ClickingLost;
+            None
+        } else {
+            None
+        };
+        (click.is_active, select_event)
+    }
+}
+
 const IDENTITY_POSE: Posef = Posef {
     orientation: Quaternionf {
         x: 0.,
@@ -124,33 +158,13 @@ impl OpenXRInput {
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
 
-        let select_event = if click.is_active {
-            match (click.current_state, self.click_state) {
-                (true, ClickState::Done) => {
-                    self.click_state = ClickState::Clicking;
-                    Some(SelectEvent::Start)
-                }
-                (false, ClickState::Clicking) => {
-                    self.click_state = ClickState::Done;
-                    Some(SelectEvent::Select)
-                }
-                (false, ClickState::ClickingLost) => {
-                    self.click_state = ClickState::Done;
-                    Some(SelectEvent::End)
-                }
-                _ => None,
-            }
-        } else if self.click_state == ClickState::Clicking {
-            self.click_state = ClickState::ClickingLost;
-            None
-        } else {
-            None
-        };
+        let (is_active, select_event) = self.click_state.update(&self.action_click, session);
 
         let input_frame = InputFrame {
             target_ray_origin,
             id: self.id,
-            pressed: click.is_active && click.current_state,
+            pressed: is_active && click.current_state,
+            squeezed: false,
             grip_origin,
         };
 

@@ -6,6 +6,7 @@ use crate::Frame;
 use crate::InputId;
 use crate::InputSource;
 use crate::SelectEvent;
+use crate::SelectKind;
 use crate::Sender;
 
 #[derive(Clone, Debug)]
@@ -20,7 +21,7 @@ pub enum Event {
     /// Session focused/blurred/etc
     VisibilityChange(Visibility),
     /// Selection started / ended
-    Select(InputId, SelectEvent, Frame),
+    Select(InputId, SelectKind, SelectEvent, Frame),
 }
 
 #[derive(Copy, Clone, Debug)]
