@@ -56,3 +56,10 @@ pub enum SelectEvent {
     /// Selection ended *with* it being a contiguous select event
     Select,
 }
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum SelectKind {
+    Select,
+    Squeeze,
+}

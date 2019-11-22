@@ -38,6 +38,7 @@ use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
 use webxr_api::SessionMode;
@@ -451,14 +452,18 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         if let Some(right_select) = right_select {
             self.events.callback(Event::Select(
                 InputId(0),
-                false,
+                SelectKind::Select,
                 right_select,
                 frame.clone(),
             ));
         }
         if let Some(left_select) = left_select {
-            self.events
-                .callback(Event::Select(InputId(1), false, left_select, frame.clone()));
+            self.events.callback(Event::Select(
+                InputId(1),
+                SelectKind::Select,
+                left_select,
+                frame.clone(),
+            ));
         }
 
         // todo use pose in input
