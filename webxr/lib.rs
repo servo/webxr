@@ -28,8 +28,6 @@ mod egl;
 #[cfg(feature = "openxr-api")]
 pub mod openxr;
 
-pub(crate) mod utils;
-
 /// A type synonym for swap chains
 pub type SwapChains = surfman_chains::SwapChains<webxr_api::SwapChainId>;
 
