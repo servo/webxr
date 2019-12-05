@@ -18,6 +18,7 @@ mod input;
 mod mock;
 mod registry;
 mod session;
+pub mod util;
 mod view;
 
 pub use device::DeviceAPI;

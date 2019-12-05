@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::utils::ClipPlanes;
 use crate::SessionBuilder;
 use crate::SwapChains;
 
@@ -32,6 +31,7 @@ use surfman::platform::generic::universal::context::Context;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
 
+use webxr_api::util::ClipPlanes;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Display;

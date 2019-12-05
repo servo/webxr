@@ -1,4 +1,3 @@
-use crate::utils::ClipPlanes;
 use crate::SessionBuilder;
 use crate::SwapChains;
 
@@ -25,6 +24,7 @@ use surfman::platform::generic::universal::context::Context as SurfmanContext;
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
 use webxr_api;
+use webxr_api::util::{self, ClipPlanes};
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
@@ -716,34 +716,11 @@ fn transform<Src, Dst>(pose: &Posef) -> RigidTransform3D<f32, Src, Dst> {
 
 #[inline]
 fn fov_to_projection_matrix<T, U>(fov: &Fovf, clip_planes: ClipPlanes) -> Transform3D<f32, T, U> {
-    let near = clip_planes.near;
-    let far = clip_planes.far;
-    // XXXManishearth deal with infinite planes
-    let left = fov.angle_left.tan() * near;
-    let right = fov.angle_right.tan() * near;
-    let top = fov.angle_up.tan() * near;
-    let bottom = fov.angle_down.tan() * near;
-
-    let w = right - left;
-    let h = top - bottom;
-    let d = far - near;
-
-    Transform3D::column_major(
-        2. * near / w,
-        0.,
-        (right + left) / w,
-        0.,
-        0.,
-        2. * near / h,
-        (top + bottom) / h,
-        0.,
-        0.,
-        0.,
-        -(far + near) / d,
-        -2. * far * near / d,
-        0.,
-        0.,
-        -1.,
-        0.,
+    util::fov_to_projection_matrix(
+        fov.angle_left,
+        fov.angle_right,
+        fov.angle_up,
+        fov.angle_down,
+        clip_planes,
     )
 }

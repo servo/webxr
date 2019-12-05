@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use webxr_api::util::{self, ClipPlanes};
 use webxr_api::DeviceAPI;
 use webxr_api::Error;
 use webxr_api::Event;
@@ -21,7 +22,6 @@ use webxr_api::Viewer;
 use webxr_api::Views;
 
 use crate::gles as gl;
-use crate::utils::ClipPlanes;
 
 use euclid::default::Size2D as DefaultSize2D;
 use euclid::Point2D;
@@ -622,13 +622,13 @@ fn fov_to_projection_matrix<T, U>(
     fov: &gvr::gvr_rectf,
     clip_planes: ClipPlanes,
 ) -> Transform3D<f32, T, U> {
-    let near = clip_planes.near;
-    let far = clip_planes.far;
-    let left = -fov.left.to_radians().tan() * near;
-    let right = fov.right.to_radians().tan() * near;
-    let top = fov.top.to_radians().tan() * near;
-    let bottom = -fov.bottom.to_radians().tan() * near;
-    Transform3D::ortho(left, right, bottom, top, near, far)
+    util::fov_to_projection_matrix(
+        -fov.left.to_radians(),
+        fov.right.to_radians(),
+        fov.top.to_radians(),
+        -fov.bottom.to_radians(),
+        clip_planes,
+    )
 }
 
 #[inline]
