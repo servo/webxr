@@ -42,12 +42,13 @@ pub trait DeviceAPI<Surface>: 'static {
 
     /// A resolution large enough to contain all the viewports.
     /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
-    fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
         let viewport = match self.views() {
+            Views::Inline => return None,
             Views::Mono(view) => view.viewport,
             Views::Stereo(left, right) => left.viewport.union(&right.viewport),
         };
-        Size2D::new(viewport.max_x(), viewport.max_y())
+        Some(Size2D::new(viewport.max_x(), viewport.max_y()))
     }
 
     /// This method should block waiting for the next frame,

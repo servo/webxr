@@ -84,7 +84,7 @@ impl Quitter {
 pub struct Session {
     floor_transform: RigidTransform3D<f32, Native, Floor>,
     views: Views,
-    resolution: Size2D<i32, Viewport>,
+    resolution: Option<Size2D<i32, Viewport>>,
     sender: Sender<SessionMsg>,
     environment_blend_mode: EnvironmentBlendMode,
     initial_inputs: Vec<InputSource>,
@@ -109,6 +109,7 @@ impl Session {
 
     pub fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
         self.resolution
+            .expect("Inline XR sessions should not construct a framebuffer")
     }
 
     pub fn set_swap_chain(&mut self, swap_chain_id: Option<SwapChainId>) {

@@ -87,6 +87,8 @@ impl<Eye> Default for View<Eye> {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Views {
+    /// Mono view for inline VR, viewport and projection matrices are calculated by client
+    Inline,
     Mono(View<Viewer>),
     Stereo(View<LeftEye>, View<RightEye>),
 }
