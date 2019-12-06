@@ -51,6 +51,7 @@ struct InputInfo {
 
 struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
+    mode: SessionMode,
 }
 
 struct HeadlessDeviceData {
@@ -110,7 +111,7 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
             return Err(Error::NoMatchingDevice);
         }
         let data = self.data.clone();
-        xr.run_on_main_thread(move || Ok(HeadlessDevice { data }))
+        xr.run_on_main_thread(move || Ok(HeadlessDevice { data, mode }))
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
@@ -124,7 +125,11 @@ impl DeviceAPI<Surface> for HeadlessDevice {
     }
 
     fn views(&self) -> Views {
-        self.data.lock().unwrap().views.clone()
+        if self.mode == SessionMode::Inline {
+            Views::Inline
+        } else {
+            self.data.lock().unwrap().views.clone()
+        }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
