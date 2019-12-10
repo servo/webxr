@@ -107,7 +107,7 @@ fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceDat
 
 impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
     fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
-        if self.data.lock().unwrap().disconnected || !self.supports_session(mode) {
+        if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
         let data = self.data.clone();
@@ -115,7 +115,8 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        mode == SessionMode::Inline || self.supports_immersive
+        (!self.data.lock().unwrap().disconnected)
+            && (mode == SessionMode::Inline || self.supports_immersive)
     }
 }
 
