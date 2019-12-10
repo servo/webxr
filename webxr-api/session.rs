@@ -250,6 +250,7 @@ where
             }
             SessionMsg::Quit => {
                 self.device.quit();
+                return false;
             }
         }
         true
