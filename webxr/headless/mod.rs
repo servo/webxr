@@ -32,7 +32,7 @@ use webxr_api::Views;
 use euclid::RigidTransform3D;
 
 use std::sync::{Arc, Mutex};
-use std::{thread, time};
+use std::thread;
 
 use surfman::platform::generic::universal::surface::Surface;
 
@@ -134,7 +134,8 @@ impl DeviceAPI<Surface> for HeadlessDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
-        thread::sleep(time::Duration::from_millis(20));
+        thread::sleep(std::time::Duration::from_millis(20));
+        let time_ns = time::precise_time_ns();
         let mut data = self.data.lock().unwrap();
         let transform = data.viewer_origin;
         let inputs = data
@@ -160,6 +161,7 @@ impl DeviceAPI<Surface> for HeadlessDevice {
             transform,
             inputs,
             events,
+            time_ns,
         })
     }
 

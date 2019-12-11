@@ -395,6 +395,7 @@ impl Device for MagicLeapDevice {
         if let Err(err) = self.start_frame() {
             error!("Failed to start frame ({:?}).", err);
         }
+        let time_ns = time::precise_time_ns();
 
         let transform = self.lerp_transforms();
         let inputs = Vec::new();
@@ -407,6 +408,7 @@ impl Device for MagicLeapDevice {
             transform,
             inputs,
             events,
+            time_ns,
         })
     }
 

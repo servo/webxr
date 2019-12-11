@@ -52,7 +52,6 @@ pub use registry::MainThreadWaker;
 pub use registry::Registry;
 
 pub use session::EnvironmentBlendMode;
-pub use session::HighResTimeStamp;
 pub use session::MainThreadSession;
 pub use session::Quitter;
 pub use session::Session;

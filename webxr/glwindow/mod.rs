@@ -116,6 +116,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         self.window.swap_buffers();
+        let time_ns = time::precise_time_ns();
         let translation = Vector3D::from_untyped(self.window.get_translation());
         let translation: RigidTransform3D<_, _, Native> =
             RigidTransform3D::from_translation(translation);
@@ -131,6 +132,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             transform,
             inputs: vec![],
             events,
+            time_ns,
         })
     }
 

@@ -548,6 +548,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         unsafe {
             self.acquire_frame();
         }
+        let time_ns = time::precise_time_ns();
         let events = if self.clip_planes.recently_updated() {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {
@@ -558,6 +559,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
             transform: self.fetch_head_matrix(),
             inputs: self.input_state(),
             events,
+            time_ns,
         })
     }
 

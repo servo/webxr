@@ -26,6 +26,9 @@ pub struct Frame {
 
     /// Events that occur with the frame.
     pub events: Vec<FrameUpdateEvent>,
+
+    /// Value of time::precise_time_ns() when frame was obtained
+    pub time_ns: u64,
 }
 
 #[derive(Clone, Debug)]

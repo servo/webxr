@@ -411,6 +411,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             return None;
         }
         self.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        let time_ns = time::precise_time_ns();
         // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, views) = self
             .session
@@ -447,6 +448,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             transform,
             inputs: vec![right_input_frame, left_input_frame],
             events,
+            time_ns,
         };
 
         if let Some(right_select) = right_select {

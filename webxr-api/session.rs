@@ -51,16 +51,13 @@ pub enum EnvironmentBlendMode {
     Additive,
 }
 
-/// https://www.w3.org/TR/hr-time/#dom-domhighrestimestamp
-pub type HighResTimeStamp = f64;
-
 // The messages that are sent from the content thread to the session thread.
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
     SetSwapChain(Option<SwapChainId>),
     SetEventDest(Sender<Event>),
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
-    RequestAnimationFrame(Sender<(HighResTimeStamp, Frame)>),
+    RequestAnimationFrame(Sender<Frame>),
     RenderAnimationFrame,
     Quit,
 }
@@ -116,7 +113,7 @@ impl Session {
         let _ = self.sender.send(SessionMsg::SetSwapChain(swap_chain_id));
     }
 
-    pub fn request_animation_frame(&mut self, dest: Sender<(HighResTimeStamp, Frame)>) {
+    pub fn request_animation_frame(&mut self, dest: Sender<Frame>) {
         let _ = self.sender.send(SessionMsg::RequestAnimationFrame(dest));
     }
 
@@ -149,7 +146,7 @@ pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
     sender: Sender<SessionMsg>,
     swap_chain: Option<SwapChains::SwapChain>,
     swap_chains: SwapChains,
-    timestamp: HighResTimeStamp,
+    frame_count: u64,
     current_frame: Option<Frame>,
     running: bool,
     device: Device,
@@ -165,7 +162,7 @@ where
         device.set_quitter(Quitter {
             sender: sender.clone(),
         });
-        let timestamp = 0.0;
+        let frame_count = 0;
         let swap_chain = None;
         let running = true;
         Ok(SessionThread {
@@ -174,7 +171,7 @@ where
             device,
             swap_chain,
             swap_chains,
-            timestamp,
+            frame_count,
             current_frame: None,
             running,
         })
@@ -219,7 +216,6 @@ where
                 self.device.set_event_dest(dest);
             }
             SessionMsg::RequestAnimationFrame(dest) => {
-                let timestamp = self.timestamp;
                 let frame = match self.current_frame.take() {
                     Some(frame) => frame,
                     None => match self.device.wait_for_animation_frame() {
@@ -230,11 +226,11 @@ where
                         }
                     },
                 };
-                let _ = dest.send((timestamp, frame));
+                let _ = dest.send(frame);
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
-                self.timestamp += 1.0;
+                self.frame_count += 1;
                 if let Some(ref swap_chain) = self.swap_chain {
                     if let Some(surface) = swap_chain.take_surface() {
                         let surface = self.device.render_animation_frame(surface);
@@ -269,8 +265,8 @@ where
     SwapChains: SwapChainsAPI<SwapChainId>,
 {
     fn run_one_frame(&mut self) {
-        let timestamp = self.timestamp;
-        while timestamp == self.timestamp && self.running {
+        let frame_count = self.frame_count;
+        while frame_count == self.frame_count && self.running {
             if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
                 self.running = self.handle_msg(msg);
             } else {
