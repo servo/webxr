@@ -450,7 +450,7 @@ impl Device for MagicLeapDevice {
 
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         // TODO: get this from the device
-        Some(RigidTransform3D::from_translation(Vector3D::new(0.0, -1.0, 0.0)))
+        Some(RigidTransform3D::from_translation(Vector3D::new(0.0, 1.0, 0.0)))
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {

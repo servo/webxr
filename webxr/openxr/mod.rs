@@ -359,7 +359,7 @@ impl OpenXrDevice {
 
 impl DeviceAPI<Surface> for OpenXrDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
-        let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
+        let translation = Vector3D::new(HEIGHT, 0.0, 0.0);
         Some(RigidTransform3D::from_translation(translation))
     }
 
