@@ -103,9 +103,9 @@ pub struct GlWindowDevice {
 }
 
 impl DeviceAPI<Surface> for GlWindowDevice {
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
-        RigidTransform3D::from_translation(translation)
+        Some(RigidTransform3D::from_translation(translation))
     }
 
     fn views(&self) -> Views {
@@ -122,7 +122,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             RigidTransform3D::from_translation(translation);
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
         let rotation = RigidTransform3D::from_rotation(rotation);
-        let transform = translation.post_transform(&rotation);
+        let transform = Some(translation.post_transform(&rotation));
         let events = if self.clip_planes.recently_updated() {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {

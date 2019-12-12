@@ -46,7 +46,8 @@ struct HeadlessDiscovery {
 struct InputInfo {
     source: InputSource,
     active: bool,
-    pointer: RigidTransform3D<f32, Input, Native>,
+    pointer: Option<RigidTransform3D<f32, Input, Native>>,
+    grip: Option<RigidTransform3D<f32, Input, Native>>,
 }
 
 struct HeadlessDevice {
@@ -55,10 +56,11 @@ struct HeadlessDevice {
 }
 
 struct HeadlessDeviceData {
-    floor_transform: RigidTransform3D<f32, Native, Floor>,
-    viewer_origin: RigidTransform3D<f32, Viewer, Native>,
+    floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
+    viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     views: Views,
     needs_view_update: bool,
+    needs_floor_update: bool,
     inputs: Vec<InputInfo>,
     events: EventBuffer,
     quitter: Option<Quitter>,
@@ -72,13 +74,14 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
         receiver: Receiver<MockDeviceMsg>,
     ) -> Result<Box<dyn DiscoveryAPI<SwapChains>>, Error> {
         let viewer_origin = init.viewer_origin.clone();
-        let floor_transform = init.floor_origin.inverse();
+        let floor_transform = init.floor_origin.map(|f| f.inverse());
         let views = init.views.clone();
         let data = HeadlessDeviceData {
             floor_transform,
             viewer_origin,
             views,
             needs_view_update: false,
+            needs_floor_update: false,
             inputs: vec![],
             events: Default::default(),
             quitter: None,
@@ -121,7 +124,7 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
 }
 
 impl DeviceAPI<Surface> for HeadlessDevice {
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.data.lock().unwrap().floor_transform.clone()
     }
 
@@ -144,19 +147,26 @@ impl DeviceAPI<Surface> for HeadlessDevice {
             .filter(|i| i.active)
             .map(|i| InputFrame {
                 id: i.source.id,
-                target_ray_origin: Some(i.pointer),
-                grip_origin: None,
+                target_ray_origin: i.pointer,
+                grip_origin: i.grip,
                 pressed: false,
                 squeezed: false,
             })
             .collect();
 
-        let events = if data.needs_view_update {
+        let mut events = if data.needs_view_update {
             data.needs_view_update = false;
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {
             vec![]
         };
+
+        if data.needs_floor_update {
+            events.push(FrameUpdateEvent::UpdateFloorTransform(
+                data.floor_transform.clone(),
+            ));
+            data.needs_floor_update = false;
+        }
         Some(Frame {
             transform,
             inputs,
@@ -203,6 +213,10 @@ impl HeadlessDeviceData {
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
             }
+            MockDeviceMsg::SetFloorOrigin(floor_origin) => {
+                self.floor_transform = floor_origin.map(|f| f.inverse());
+                self.needs_floor_update = true;
+            }
             MockDeviceMsg::SetViews(views) => {
                 self.views = views;
                 self.needs_view_update = true;
@@ -217,6 +231,7 @@ impl HeadlessDeviceData {
                 self.inputs.push(InputInfo {
                     source: init.source,
                     pointer: init.pointer_origin,
+                    grip: init.grip_origin,
                     active: true,
                 });
                 self.events.callback(Event::AddInput(init.source))
@@ -227,6 +242,7 @@ impl HeadlessDeviceData {
                         MockInputMsg::SetHandedness(h) => input.source.handedness = h,
                         MockInputMsg::SetTargetRayMode(t) => input.source.target_ray_mode = t,
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
+                        MockInputMsg::SetGripOrigin(p) => input.grip = p,
                         MockInputMsg::Disconnect => input.active = false,
                         MockInputMsg::Reconnect => input.active = true,
                     }

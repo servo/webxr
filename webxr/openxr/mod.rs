@@ -358,9 +358,9 @@ impl OpenXrDevice {
 }
 
 impl DeviceAPI<Surface> for OpenXrDevice {
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         let translation = Vector3D::new(-HEIGHT, 0.0, 0.0);
-        RigidTransform3D::from_translation(translation)
+        Some(RigidTransform3D::from_translation(translation))
     }
 
     fn views(&self) -> Views {
@@ -426,7 +426,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .viewer_space
             .locate(&self.space, self.frame_state.predicted_display_time)
             .unwrap();
-        let transform = transform(&pose.pose);
+        let transform = Some(transform(&pose.pose));
         let events = if self.clip_planes.recently_updated() {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {

@@ -35,7 +35,7 @@ pub trait DiscoveryAPI<SwapChains>: 'static {
 /// A trait for using an XR device
 pub trait DeviceAPI<Surface>: 'static {
     /// The transform from native coordinates to the floor.
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor>;
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>>;
 
     /// The transforms from viewer coordinates to the eyes, and their associated viewports.
     fn views(&self) -> Views;

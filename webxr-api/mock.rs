@@ -33,17 +33,18 @@ pub trait MockDiscoveryAPI<SwapChains>: 'static {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockDeviceInit {
-    pub floor_origin: RigidTransform3D<f32, Floor, Native>,
+    pub floor_origin: Option<RigidTransform3D<f32, Floor, Native>>,
     pub supports_immersive: bool,
     pub supports_unbounded: bool,
-    pub viewer_origin: RigidTransform3D<f32, Viewer, Native>,
+    pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     pub views: Views,
 }
 
 #[derive(Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum MockDeviceMsg {
-    SetViewerOrigin(RigidTransform3D<f32, Viewer, Native>),
+    SetViewerOrigin(Option<RigidTransform3D<f32, Viewer, Native>>),
+    SetFloorOrigin(Option<RigidTransform3D<f32, Floor, Native>>),
     SetViews(Views),
     AddInputSource(MockInputInit),
     MessageInputSource(InputId, MockInputMsg),
@@ -56,7 +57,8 @@ pub enum MockDeviceMsg {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockInputInit {
     pub source: InputSource,
-    pub pointer_origin: RigidTransform3D<f32, Input, Native>,
+    pub pointer_origin: Option<RigidTransform3D<f32, Input, Native>>,
+    pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
 }
 
 #[derive(Debug)]
@@ -64,7 +66,8 @@ pub struct MockInputInit {
 pub enum MockInputMsg {
     SetHandedness(Handedness),
     SetTargetRayMode(TargetRayMode),
-    SetPointerOrigin(RigidTransform3D<f32, Input, Native>),
+    SetPointerOrigin(Option<RigidTransform3D<f32, Input, Native>>),
+    SetGripOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     Disconnect,
     Reconnect,
 }
