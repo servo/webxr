@@ -397,7 +397,7 @@ impl Device for MagicLeapDevice {
         }
         let time_ns = time::precise_time_ns();
 
-        let transform = self.lerp_transforms();
+        let transform = Some(self.lerp_transforms());
         let inputs = Vec::new();
         let events = if self.view_update_needed {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
@@ -448,9 +448,11 @@ impl Device for MagicLeapDevice {
         Views::Stereo(left, right)
     }
 
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         // TODO: get this from the device
-        RigidTransform3D::from_translation(Vector3D::new(0.0, -1.0, 0.0))
+        Some(RigidTransform3D::from_translation(Vector3D::new(
+            0.0, 1.0, 0.0,
+        )))
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {

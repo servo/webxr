@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::Floor;
 use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
@@ -19,7 +20,7 @@ pub struct Frame {
     ///
     /// This is equivalent to the pose of the viewer in native coordinates.
     /// This is the inverse of the view matrix.
-    pub transform: RigidTransform3D<f32, Viewer, Native>,
+    pub transform: Option<RigidTransform3D<f32, Viewer, Native>>,
 
     /// Frame information for each connected input source
     pub inputs: Vec<InputFrame>,
@@ -35,4 +36,5 @@ pub struct Frame {
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum FrameUpdateEvent {
     UpdateViews(Views),
+    UpdateFloorTransform(Option<RigidTransform3D<f32, Native, Floor>>),
 }

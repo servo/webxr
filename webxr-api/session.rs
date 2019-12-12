@@ -79,7 +79,7 @@ impl Quitter {
 /// https://www.w3.org/TR/webxr/#xrsession-interface
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Session {
-    floor_transform: RigidTransform3D<f32, Native, Floor>,
+    floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
     views: Views,
     resolution: Option<Size2D<i32, Viewport>>,
     sender: Sender<SessionMsg>,
@@ -88,7 +88,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    pub fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.floor_transform.clone()
     }
 
@@ -136,6 +136,7 @@ impl Session {
     pub fn apply_event(&mut self, event: FrameUpdateEvent) {
         match event {
             FrameUpdateEvent::UpdateViews(views) => self.views = views,
+            FrameUpdateEvent::UpdateFloorTransform(floor) => self.floor_transform = floor,
         }
     }
 }

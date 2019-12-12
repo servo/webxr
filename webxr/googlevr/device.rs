@@ -530,10 +530,10 @@ impl GoogleVRDevice {
 }
 
 impl DeviceAPI<Surface> for GoogleVRDevice {
-    fn floor_transform(&self) -> RigidTransform3D<f32, Native, Floor> {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         // GoogleVR doesn't know about the floor
         // XXXManishearth perhaps we should report a guesstimate value here
-        RigidTransform3D::identity()
+        Some(RigidTransform3D::identity())
     }
 
     fn views(&self) -> Views {
@@ -556,7 +556,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         };
         // Predict head matrix
         Some(Frame {
-            transform: self.fetch_head_matrix(),
+            transform: Some(self.fetch_head_matrix()),
             inputs: self.input_state(),
             events,
             time_ns,
