@@ -3,20 +3,23 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::DiscoveryAPI;
+use crate::Display;
 use crate::Error;
 use crate::Floor;
 use crate::Handedness;
 use crate::Input;
 use crate::InputId;
 use crate::InputSource;
+use crate::LeftEye;
 use crate::Native;
 use crate::Receiver;
+use crate::RightEye;
 use crate::Sender;
 use crate::TargetRayMode;
 use crate::Viewer;
-use crate::Views;
+use crate::Viewport;
 
-use euclid::RigidTransform3D;
+use euclid::{Rect, RigidTransform3D, Transform3D};
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -37,7 +40,24 @@ pub struct MockDeviceInit {
     pub supports_immersive: bool,
     pub supports_unbounded: bool,
     pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
-    pub views: Views,
+    pub views: MockViewsInit,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct MockViewInit<Eye> {
+    pub transform: RigidTransform3D<f32, Viewer, Eye>,
+    pub projection: Transform3D<f32, Eye, Display>,
+    pub viewport: Rect<i32, Viewport>,
+    /// field of view values, in radians
+    pub fov: Option<(f32, f32, f32, f32)>,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum MockViewsInit {
+    Mono(MockViewInit<Viewer>),
+    Stereo(MockViewInit<LeftEye>, MockViewInit<RightEye>),
 }
 
 #[derive(Debug)]
@@ -45,7 +65,7 @@ pub struct MockDeviceInit {
 pub enum MockDeviceMsg {
     SetViewerOrigin(Option<RigidTransform3D<f32, Viewer, Native>>),
     SetFloorOrigin(Option<RigidTransform3D<f32, Floor, Native>>),
-    SetViews(Views),
+    SetViews(MockViewsInit),
     AddInputSource(MockInputInit),
     MessageInputSource(InputId, MockInputMsg),
     Focus,

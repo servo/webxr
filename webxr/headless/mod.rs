@@ -5,6 +5,7 @@
 use crate::SessionBuilder;
 use crate::SwapChains;
 
+use webxr_api::util::{self, ClipPlanes};
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
@@ -20,12 +21,15 @@ use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscoveryAPI;
 use webxr_api::MockInputMsg;
+use webxr_api::MockViewInit;
+use webxr_api::MockViewsInit;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Receiver;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionMode;
+use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
 
@@ -53,12 +57,13 @@ struct InputInfo {
 struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
     mode: SessionMode,
+    clip_planes: ClipPlanes,
 }
 
 struct HeadlessDeviceData {
     floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
     viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
-    views: Views,
+    views: MockViewsInit,
     needs_view_update: bool,
     needs_floor_update: bool,
     inputs: Vec<InputInfo>,
@@ -114,12 +119,33 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
             return Err(Error::NoMatchingDevice);
         }
         let data = self.data.clone();
-        xr.run_on_main_thread(move || Ok(HeadlessDevice { data, mode }))
+        let clip_planes = Default::default();
+        xr.run_on_main_thread(move || {
+            Ok(HeadlessDevice {
+                data,
+                mode,
+                clip_planes,
+            })
+        })
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
         (!self.data.lock().unwrap().disconnected)
             && (mode == SessionMode::Inline || self.supports_immersive)
+    }
+}
+
+fn view<Eye>(init: MockViewInit<Eye>, clip_planes: ClipPlanes) -> View<Eye> {
+    let projection = if let Some((l, r, t, b)) = init.fov {
+        util::fov_to_projection_matrix(l, r, t, b, clip_planes)
+    } else {
+        init.projection
+    };
+
+    View {
+        transform: init.transform,
+        projection,
+        viewport: init.viewport,
     }
 }
 
@@ -132,7 +158,13 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         if self.mode == SessionMode::Inline {
             Views::Inline
         } else {
-            self.data.lock().unwrap().views.clone()
+            let views = self.data.lock().unwrap().views.clone();
+            match views {
+                MockViewsInit::Mono(one) => Views::Mono(view(one, self.clip_planes)),
+                MockViewsInit::Stereo(one, two) => {
+                    Views::Stereo(view(one, self.clip_planes), view(two, self.clip_planes))
+                }
+            }
         }
     }
 
@@ -195,9 +227,9 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         self.data.lock().unwrap().quitter = Some(quitter);
     }
 
-    fn update_clip_planes(&mut self, _: f32, _: f32) {
-        // The views are actually set through the test API so this does nothing
-        // https://github.com/immersive-web/webxr-test-api/issues/39
+    fn update_clip_planes(&mut self, near: f32, far: f32) {
+        self.clip_planes.update(near, far);
+        self.data.lock().unwrap().needs_view_update = true;
     }
 }
 
