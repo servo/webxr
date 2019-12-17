@@ -138,8 +138,10 @@ struct OpenXrDevice {
     right_extent: Extent2Di,
     left_swapchain: Swapchain<D3D11>,
     left_image: u32,
+    left_images: Vec<<D3D11 as Graphics>::SwapchainImage>,
     right_swapchain: Swapchain<D3D11>,
     right_image: u32,
+    right_images: Vec<<D3D11 as Graphics>::SwapchainImage>,
     surfman: (SurfmanDevice, SurfmanContext),
 
     // input
@@ -279,8 +281,14 @@ impl OpenXrDevice {
         let left_swapchain = session
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+        let left_images = left_swapchain
+            .enumerate_images()
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
         let right_swapchain = session
             .create_swapchain(&swapchain_create_info)
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+        let right_images = right_swapchain
+            .enumerate_images()
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
         // input
@@ -313,12 +321,14 @@ impl OpenXrDevice {
             clip_planes: Default::default(),
             left_extent,
             right_extent,
-            left_image: 0,
-            right_image: 0,
             openxr_views: vec![],
             view_configurations,
             left_swapchain,
             right_swapchain,
+            left_images,
+            right_images,
+            left_image: 0,
+            right_image: 0,
             surfman: surfman.extract(),
 
             action_set,
@@ -511,11 +521,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .wait_image(openxr::Duration::INFINITE)
             .unwrap();
 
-        // TODO: the enumeration only needs to happen at initialization, not every frame.
-        let left_swapchain_images = self.left_swapchain.enumerate_images().unwrap();
-        let left_image = left_swapchain_images[self.left_image as usize];
-        let right_swapchain_images = self.right_swapchain.enumerate_images().unwrap();
-        let right_image = right_swapchain_images[self.right_image as usize];
+        let left_image = self.left_images[self.left_image as usize];
+        let right_image = self.right_images[self.right_image as usize];
 
         let left_surface = unsafe {
             device
