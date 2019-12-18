@@ -246,6 +246,19 @@ impl OpenXrDevice {
 
         let left_view_configuration = view_configurations[0];
         let right_view_configuration = view_configurations[1];
+        assert_eq!(
+            left_view_configuration.recommended_image_rect_width,
+            right_view_configuration.recommended_image_rect_width,
+        );
+        assert_eq!(
+            left_view_configuration.recommended_image_rect_height,
+            right_view_configuration.recommended_image_rect_height,
+        );
+        assert_eq!(
+            left_view_configuration.recommended_swapchain_sample_count,
+            right_view_configuration.recommended_swapchain_sample_count,
+        );
+
         let left_extent = Extent2Di {
             width: left_view_configuration.recommended_image_rect_width as i32,
             height: left_view_configuration.recommended_image_rect_height as i32,
@@ -269,8 +282,7 @@ impl OpenXrDevice {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
             format,
-            sample_count: 1,
-            // XXXManishearth what if the recommended widths are different?
+            sample_count: left_view_configuration.recommended_swapchain_sample_count,
             width: left_view_configuration.recommended_image_rect_width,
             height: left_view_configuration.recommended_image_rect_height,
             face_count: 1,
