@@ -57,7 +57,7 @@ enum SessionMsg {
     SetSwapChain(Option<SwapChainId>),
     SetEventDest(Sender<Event>),
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
-    RequestAnimationFrame(Sender<Frame>),
+    StartRenderLoop,
     RenderAnimationFrame,
     Quit,
 }
@@ -113,8 +113,8 @@ impl Session {
         let _ = self.sender.send(SessionMsg::SetSwapChain(swap_chain_id));
     }
 
-    pub fn request_animation_frame(&mut self, dest: Sender<Frame>) {
-        let _ = self.sender.send(SessionMsg::RequestAnimationFrame(dest));
+    pub fn start_render_loop(&mut self) {
+        let _ = self.sender.send(SessionMsg::StartRenderLoop);
     }
 
     pub fn update_clip_planes(&mut self, near: f32, far: f32) {
@@ -148,7 +148,7 @@ pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
     swap_chain: Option<SwapChains::SwapChain>,
     swap_chains: SwapChains,
     frame_count: u64,
-    current_frame: Option<Frame>,
+    frame_sender: Sender<Frame>,
     running: bool,
     device: Device,
 }
@@ -158,7 +158,11 @@ where
     Device: DeviceAPI<SwapChains::Surface>,
     SwapChains: SwapChainsAPI<SwapChainId>,
 {
-    pub fn new(mut device: Device, swap_chains: SwapChains) -> Result<Self, Error> {
+    pub fn new(
+        mut device: Device,
+        swap_chains: SwapChains,
+        frame_sender: Sender<Frame>,
+    ) -> Result<Self, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         device.set_quitter(Quitter {
             sender: sender.clone(),
@@ -173,7 +177,7 @@ where
             swap_chain,
             swap_chains,
             frame_count,
-            current_frame: None,
+            frame_sender,
             running,
         })
     }
@@ -216,18 +220,16 @@ where
             SessionMsg::SetEventDest(dest) => {
                 self.device.set_event_dest(dest);
             }
-            SessionMsg::RequestAnimationFrame(dest) => {
-                let frame = match self.current_frame.take() {
+            SessionMsg::StartRenderLoop => {
+                let frame = match self.device.wait_for_animation_frame() {
                     Some(frame) => frame,
-                    None => match self.device.wait_for_animation_frame() {
-                        Some(frame) => frame,
-                        None => {
-                            warn!("Device stopped providing frames, exiting");
-                            return false;
-                        }
-                    },
+                    None => {
+                        warn!("Device stopped providing frames, exiting");
+                        return false;
+                    }
                 };
-                let _ = dest.send(frame);
+
+                let _ = self.frame_sender.send(frame);
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame => {
@@ -238,12 +240,14 @@ where
                         swap_chain.recycle_surface(surface);
                     }
                 }
-                self.current_frame = self.device.wait_for_animation_frame();
-
-                if self.current_frame.is_none() {
-                    warn!("Device stopped providing frames, exiting");
-                    return false;
-                }
+                let frame = match self.device.wait_for_animation_frame() {
+                    Some(frame) => frame,
+                    None => {
+                        warn!("Device stopped providing frames, exiting");
+                        return false;
+                    }
+                };
+                let _ = self.frame_sender.send(frame);
             }
             SessionMsg::Quit => {
                 self.device.quit();
@@ -285,6 +289,7 @@ where
 pub struct SessionBuilder<'a, SwapChains: 'a> {
     swap_chains: &'a SwapChains,
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
+    frame_sender: Sender<Frame>,
 }
 
 impl<'a, SwapChains> SessionBuilder<'a, SwapChains>
@@ -294,10 +299,12 @@ where
     pub(crate) fn new(
         swap_chains: &'a SwapChains,
         sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
+        frame_sender: Sender<Frame>,
     ) -> Self {
         SessionBuilder {
             swap_chains,
             sessions,
+            frame_sender,
         }
     }
 
@@ -309,8 +316,10 @@ where
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
         let swap_chains = self.swap_chains.clone();
+        let frame_sender = self.frame_sender.clone();
         thread::spawn(move || {
-            match factory().and_then(|device| SessionThread::new(device, swap_chains)) {
+            match factory().and_then(|device| SessionThread::new(device, swap_chains, frame_sender))
+            {
                 Ok(mut thread) => {
                     let session = thread.new_session();
                     let _ = acks.send(Ok(session));
@@ -332,7 +341,8 @@ where
     {
         let device = factory()?;
         let swap_chains = self.swap_chains.clone();
-        let mut session_thread = SessionThread::new(device, swap_chains)?;
+        let frame_sender = self.frame_sender.clone();
+        let mut session_thread = SessionThread::new(device, swap_chains, frame_sender)?;
         let session = session_thread.new_session();
         self.sessions.push(Box::new(session_thread));
         Ok(session)
