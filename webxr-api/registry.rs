@@ -4,6 +4,7 @@
 
 use crate::DiscoveryAPI;
 use crate::Error;
+use crate::Frame;
 use crate::MainThreadSession;
 use crate::MockDeviceInit;
 use crate::MockDeviceMsg;
@@ -90,8 +91,17 @@ impl Registry {
         self.waker.wake();
     }
 
-    pub fn request_session(&mut self, mode: SessionMode, dest: Sender<Result<Session, Error>>) {
-        let _ = self.sender.send(RegistryMsg::RequestSession(mode, dest));
+    pub fn request_session(
+        &mut self,
+        mode: SessionMode,
+        dest: Sender<Result<Session, Error>>,
+        animation_frame_handler: Sender<Frame>,
+    ) {
+        let _ = self.sender.send(RegistryMsg::RequestSession(
+            mode,
+            dest,
+            animation_frame_handler,
+        ));
         self.waker.wake();
     }
 
@@ -167,8 +177,8 @@ where
             RegistryMsg::SupportsSession(mode, dest) => {
                 let _ = dest.send(self.supports_session(mode));
             }
-            RegistryMsg::RequestSession(mode, dest) => {
-                let _ = dest.send(self.request_session(mode));
+            RegistryMsg::RequestSession(mode, dest, raf_sender) => {
+                let _ = dest.send(self.request_session(mode, raf_sender));
             }
             RegistryMsg::SimulateDeviceConnection(init, dest) => {
                 let _ = dest.send(self.simulate_device_connection(init));
@@ -189,11 +199,15 @@ where
         Err(Error::NoMatchingDevice)
     }
 
-    fn request_session(&mut self, mode: SessionMode) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        raf_sender: Sender<Frame>,
+    ) -> Result<Session, Error> {
         let swap_chains = self.swap_chains.as_mut().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
             if discovery.supports_session(mode) {
-                let xr = SessionBuilder::new(swap_chains, &mut self.sessions);
+                let xr = SessionBuilder::new(swap_chains, &mut self.sessions, raf_sender.clone());
                 match discovery.request_session(mode, xr) {
                     Ok(session) => return Ok(session),
                     Err(err) => warn!("XR device error {:?}", err),
@@ -220,7 +234,7 @@ where
 
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum RegistryMsg {
-    RequestSession(SessionMode, Sender<Result<Session, Error>>),
+    RequestSession(SessionMode, Sender<Result<Session, Error>>, Sender<Frame>),
     SupportsSession(SessionMode, Sender<Result<(), Error>>),
     SimulateDeviceConnection(MockDeviceInit, Sender<Result<Sender<MockDeviceMsg>, Error>>),
 }
