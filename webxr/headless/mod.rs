@@ -40,7 +40,7 @@ use euclid::RigidTransform3D;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use surfman::platform::generic::universal::surface::Surface;
+use surfman::Surface;
 
 pub struct HeadlessMockDiscovery {}
 

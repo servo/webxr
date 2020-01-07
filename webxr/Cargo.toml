@@ -29,8 +29,7 @@ headless = []
 ipc = ["webxr-api/ipc", "serde"]
 googlevr = ["gvr-sys", "android_injected_glue", "gles"]
 magicleap = ["egl"]
-# Enabling the sm-angle-default feature only has an effect on Windows.
-openxr-api = ["angle", "openxr", "winapi", "wio", "surfman/sm-angle-default", "surfman/sm-angle-flush"]
+openxr-api = ["angle", "openxr", "winapi", "wio", "surfman/sm-angle-default"]
 profile = ["webxr-api/profile"]
 
 [dependencies]
@@ -43,8 +42,8 @@ log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
 openxr = { version = "0.12.1", optional = true }
 serde = { version = "1.0", optional = true }
-surfman = { version = "0.1", features = ["sm-osmesa"] }
-surfman-chains = "0.3"
+surfman = { git = "https://github.com/servo/surfman" }
+surfman-chains = { git = "https://github.com/asajeffrey/surfman-chains" }
 time = "0.1.42"
 
 [target.'cfg(target_os = "windows")'.dependencies]
