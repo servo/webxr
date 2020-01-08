@@ -14,6 +14,8 @@ use crate::LeftEye;
 use crate::Native;
 use crate::Receiver;
 use crate::RightEye;
+use crate::SelectEvent;
+use crate::SelectKind;
 use crate::Sender;
 use crate::TargetRayMode;
 use crate::Viewer;
@@ -88,6 +90,10 @@ pub enum MockInputMsg {
     SetTargetRayMode(TargetRayMode),
     SetPointerOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     SetGripOrigin(Option<RigidTransform3D<f32, Input, Native>>),
+    /// Note: SelectEvent::Select here refers to a complete Select event,
+    /// not just the end event, i.e. it refers to
+    /// https://immersive-web.github.io/webxr-test-api/#dom-fakexrinputcontroller-simulateselect
+    TriggerSelect(SelectKind, SelectEvent),
     Disconnect,
     Reconnect,
 }
