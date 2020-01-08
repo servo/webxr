@@ -26,6 +26,7 @@ use webxr_api::MockViewsInit;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Receiver;
+use webxr_api::SelectEvent;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionMode;
@@ -52,6 +53,7 @@ struct InputInfo {
     active: bool,
     pointer: Option<RigidTransform3D<f32, Input, Native>>,
     grip: Option<RigidTransform3D<f32, Input, Native>>,
+    clicking: bool,
 }
 
 struct HeadlessDevice {
@@ -170,41 +172,22 @@ impl DeviceAPI<Surface> for HeadlessDevice {
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         thread::sleep(std::time::Duration::from_millis(20));
-        let time_ns = time::precise_time_ns();
         let mut data = self.data.lock().unwrap();
-        let transform = data.viewer_origin;
-        let inputs = data
-            .inputs
-            .iter()
-            .filter(|i| i.active)
-            .map(|i| InputFrame {
-                id: i.source.id,
-                target_ray_origin: i.pointer,
-                grip_origin: i.grip,
-                pressed: false,
-                squeezed: false,
-            })
-            .collect();
-
-        let mut events = if data.needs_view_update {
+        let mut frame = data.get_frame();
+        if data.needs_view_update {
             data.needs_view_update = false;
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
+            frame
+                .events
+                .push(FrameUpdateEvent::UpdateViews(self.views()))
         };
 
         if data.needs_floor_update {
-            events.push(FrameUpdateEvent::UpdateFloorTransform(
+            frame.events.push(FrameUpdateEvent::UpdateFloorTransform(
                 data.floor_transform.clone(),
             ));
             data.needs_floor_update = false;
         }
-        Some(Frame {
-            transform,
-            inputs,
-            events,
-            time_ns,
-        })
+        Some(frame)
     }
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
@@ -240,6 +223,30 @@ impl HeadlessMockDiscovery {
 }
 
 impl HeadlessDeviceData {
+    fn get_frame(&self) -> Frame {
+        let time_ns = time::precise_time_ns();
+        let transform = self.viewer_origin;
+        let inputs = self
+            .inputs
+            .iter()
+            .filter(|i| i.active)
+            .map(|i| InputFrame {
+                id: i.source.id,
+                target_ray_origin: i.pointer,
+                grip_origin: i.grip,
+                pressed: false,
+                squeezed: false,
+            })
+            .collect();
+
+        Frame {
+            transform,
+            inputs,
+            events: vec![],
+            time_ns,
+        }
+    }
+
     fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
@@ -265,6 +272,7 @@ impl HeadlessDeviceData {
                     pointer: init.pointer_origin,
                     grip: init.grip_origin,
                     active: true,
+                    clicking: false,
                 });
                 self.events.callback(Event::AddInput(init.source))
             }
@@ -275,7 +283,54 @@ impl HeadlessDeviceData {
                         MockInputMsg::SetTargetRayMode(t) => input.source.target_ray_mode = t,
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
                         MockInputMsg::SetGripOrigin(p) => input.grip = p,
-                        MockInputMsg::Disconnect => input.active = false,
+                        MockInputMsg::TriggerSelect(kind, event) => {
+                            if !input.active {
+                                return true;
+                            }
+                            let clicking = input.clicking;
+                            input.clicking = event == SelectEvent::Start;
+                            let frame = self.get_frame();
+                            match event {
+                                SelectEvent::Start => {
+                                    self.events.callback(Event::Select(id, kind, event, frame));
+                                }
+                                SelectEvent::End => {
+                                    if clicking {
+                                        self.events.callback(Event::Select(
+                                            id,
+                                            kind,
+                                            SelectEvent::Select,
+                                            frame,
+                                        ));
+                                    } else {
+                                        self.events.callback(Event::Select(
+                                            id,
+                                            kind,
+                                            SelectEvent::End,
+                                            frame,
+                                        ));
+                                    }
+                                }
+                                SelectEvent::Select => {
+                                    self.events.callback(Event::Select(
+                                        id,
+                                        kind,
+                                        SelectEvent::Start,
+                                        frame.clone(),
+                                    ));
+                                    self.events.callback(Event::Select(
+                                        id,
+                                        kind,
+                                        SelectEvent::Select,
+                                        frame,
+                                    ));
+                                }
+                            }
+                        }
+                        MockInputMsg::Disconnect => {
+                            input.active = false;
+                            input.clicking = false;
+                        }
                         MockInputMsg::Reconnect => input.active = true,
                     }
                 }
