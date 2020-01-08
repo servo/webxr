@@ -20,6 +20,7 @@ use crate::Sender;
 use crate::TargetRayMode;
 use crate::Viewer;
 use crate::Viewport;
+use crate::Visibility;
 
 use euclid::{Rect, RigidTransform3D, Transform3D};
 
@@ -70,8 +71,7 @@ pub enum MockDeviceMsg {
     SetViews(MockViewsInit),
     AddInputSource(MockInputInit),
     MessageInputSource(InputId, MockInputMsg),
-    Focus,
-    Blur,
+    VisibilityChange(Visibility),
     Disconnect(Sender<()>),
 }
 

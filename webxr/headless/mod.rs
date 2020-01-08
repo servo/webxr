@@ -260,12 +260,7 @@ impl HeadlessDeviceData {
                 self.views = views;
                 self.needs_view_update = true;
             }
-            MockDeviceMsg::Focus => {
-                // TODO
-            }
-            MockDeviceMsg::Blur => {
-                // TODO
-            }
+            MockDeviceMsg::VisibilityChange(v) => self.events.callback(Event::VisibilityChange(v)),
             MockDeviceMsg::AddInputSource(init) => {
                 self.inputs.push(InputInfo {
                     source: init.source,
