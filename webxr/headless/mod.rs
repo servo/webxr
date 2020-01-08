@@ -323,10 +323,18 @@ impl HeadlessDeviceData {
                             }
                         }
                         MockInputMsg::Disconnect => {
-                            input.active = false;
-                            input.clicking = false;
+                            if input.active {
+                                self.events.callback(Event::RemoveInput(input.source.id));
+                                input.active = false;
+                                input.clicking = false;
+                            }
                         }
-                        MockInputMsg::Reconnect => input.active = true,
+                        MockInputMsg::Reconnect => {
+                            if !input.active {
+                                self.events.callback(Event::AddInput(input.source));
+                                input.active = true;
+                            }
+                        }
                     }
                 }
             }
