@@ -44,6 +44,7 @@ pub struct MockDeviceInit {
     pub supports_unbounded: bool,
     pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     pub views: MockViewsInit,
+    pub supported_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

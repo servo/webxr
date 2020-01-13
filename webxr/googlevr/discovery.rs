@@ -8,6 +8,7 @@ use crate::SwapChains;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
 use webxr_api::Session;
+use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 
 use log::warn;
@@ -69,7 +70,12 @@ impl GoogleVRDiscovery {
 
 impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
     #[cfg(target_os = "android")]
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        init: &SessionInit,
+        xr: SessionBuilder,
+    ) -> Result<Session, Error> {
         let (ctx, controller_ctx, java_class, java_object);
         unsafe {
             ctx = SendPtr::new(self.ctx);
@@ -78,21 +84,36 @@ impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
             java_object = SendPtr::new(self.java_object);
         }
         if self.supports_session(mode) {
-            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, java_class, java_object))
+            let granted_features = init.validate(mode, &[])?;
+            xr.spawn(move || {
+                GoogleVRDevice::new(
+                    ctx,
+                    controller_ctx,
+                    java_class,
+                    java_object,
+                    granted_features,
+                )
+            })
         } else {
             Err(Error::NoMatchingDevice)
         }
     }
 
     #[cfg(not(target_os = "android"))]
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        init: &SessionInit,
+        xr: SessionBuilder,
+    ) -> Result<Session, Error> {
         let (ctx, controller_ctx);
         unsafe {
             ctx = SendPtr::new(self.ctx);
             controller_ctx = SendPtr::new(self.controller_ctx);
         }
         if self.supports_session(mode) {
-            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx))
+            let granted_features = init.validate(mode, &[])?;
+            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, granted_features))
         } else {
             Err(Error::NoMatchingDevice)
         }

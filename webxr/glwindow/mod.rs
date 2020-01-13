@@ -46,6 +46,7 @@ use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Sender;
 use webxr_api::Session;
+use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Views;
@@ -77,11 +78,17 @@ impl GlWindowDiscovery {
 }
 
 impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        init: &SessionInit,
+        xr: SessionBuilder,
+    ) -> Result<Session, Error> {
         if self.supports_session(mode) {
+            let granted_features = init.validate(mode, &["local-floor".into()])?;
             let gl = self.gl.clone();
             let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
-            xr.run_on_main_thread(move || GlWindowDevice::new(gl, window))
+            xr.run_on_main_thread(move || GlWindowDevice::new(gl, window, granted_features))
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -100,6 +107,7 @@ pub struct GlWindowDevice {
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
+    granted_features: Vec<String>,
 }
 
 impl DeviceAPI<Surface> for GlWindowDevice {
@@ -210,6 +218,10 @@ impl DeviceAPI<Surface> for GlWindowDevice {
     fn update_clip_planes(&mut self, near: f32, far: f32) {
         self.clip_planes.update(near, far)
     }
+
+    fn granted_features(&self) -> &[String] {
+        &self.granted_features
+    }
 }
 
 impl Drop for GlWindowDevice {
@@ -219,7 +231,11 @@ impl Drop for GlWindowDevice {
 }
 
 impl GlWindowDevice {
-    fn new(gl: Rc<dyn Gl>, window: Rc<dyn GlWindow>) -> Result<GlWindowDevice, Error> {
+    fn new(
+        gl: Rc<dyn Gl>,
+        window: Rc<dyn GlWindow>,
+        granted_features: Vec<String>,
+    ) -> Result<GlWindowDevice, Error> {
         window.make_current();
 
         // Slightly annoyingly the API fpr bootstrapping surfman is different
@@ -245,6 +261,7 @@ impl GlWindowDevice {
             read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),
+            granted_features,
         })
     }
 

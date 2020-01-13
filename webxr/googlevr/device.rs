@@ -84,6 +84,7 @@ pub(crate) struct GoogleVRDevice {
     presenting: bool,
     frame_bound: bool,
     surfman: Option<(SurfmanDevice, SurfmanContext)>,
+    granted_features: Vec<String>,
 }
 
 impl GoogleVRDevice {
@@ -93,6 +94,7 @@ impl GoogleVRDevice {
         controller_ctx: SendPtr<*mut gvr::gvr_controller_context>,
         java_class: SendPtr<ndk::jclass>,
         java_object: SendPtr<ndk::jobject>,
+        granted_features: Vec<String>,
     ) -> Result<Self, Error> {
         let mut device = GoogleVRDevice {
             events: Default::default(),
@@ -121,6 +123,7 @@ impl GoogleVRDevice {
             presenting: false,
             frame_bound: false,
             surfman: None,
+            granted_features,
         };
         unsafe {
             device.init();
@@ -135,6 +138,7 @@ impl GoogleVRDevice {
     pub fn new(
         ctx: SendPtr<*mut gvr::gvr_context>,
         controller_ctx: SendPtr<*mut gvr::gvr_controller_context>,
+        granted_features: Vec<String>,
     ) -> Result<Self, Error> {
         let mut device = GoogleVRDevice {
             events: Default::default(),
@@ -161,6 +165,7 @@ impl GoogleVRDevice {
             presenting: false,
             frame_bound: false,
             surfman: None,
+            granted_features,
         };
         unsafe {
             device.init();
@@ -609,6 +614,10 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
 
     fn update_clip_planes(&mut self, near: f32, far: f32) {
         self.clip_planes.update(near, far)
+    }
+
+    fn granted_features(&self) -> &[String] {
+        &self.granted_features
     }
 }
 

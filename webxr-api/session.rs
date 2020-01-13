@@ -42,6 +42,43 @@ pub enum SessionMode {
     ImmersiveAR,
 }
 
+/// https://immersive-web.github.io/webxr/#dictdef-xrsessioninit
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct SessionInit {
+    pub required_features: Vec<String>,
+    pub optional_features: Vec<String>,
+}
+
+impl SessionInit {
+    /// Helper function for validating a list of requested features against
+    /// a list of supported features for a given mode
+    pub fn validate(&self, mode: SessionMode, supported: &[String]) -> Result<Vec<String>, Error> {
+        for f in &self.required_features {
+            // viewer and local in immersive are granted by default
+            // https://immersive-web.github.io/webxr/#default-features
+            if f == "viewer" || (f == "local" && mode != SessionMode::Inline) {
+                continue;
+            }
+
+            if !supported.contains(f) {
+                return Err(Error::UnsupportedFeature(f.into()));
+            }
+        }
+        let mut granted = self.required_features.clone();
+        for f in &self.optional_features {
+            if f == "viewer"
+                || (f == "local" && mode != SessionMode::Inline)
+                || supported.contains(f)
+            {
+                granted.push(f.clone());
+            }
+        }
+
+        Ok(granted)
+    }
+}
+
 /// https://immersive-web.github.io/webxr-ar-module/#xrenvironmentblendmode-enum
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
@@ -85,6 +122,7 @@ pub struct Session {
     sender: Sender<SessionMsg>,
     environment_blend_mode: EnvironmentBlendMode,
     initial_inputs: Vec<InputSource>,
+    granted_features: Vec<String>,
 }
 
 impl Session {
@@ -139,6 +177,10 @@ impl Session {
             FrameUpdateEvent::UpdateFloorTransform(floor) => self.floor_transform = floor,
         }
     }
+
+    pub fn granted_features(&self) -> &[String] {
+        &self.granted_features
+    }
 }
 
 /// For devices that want to do their own thread management, the `SessionThread` type is exposed.
@@ -189,6 +231,7 @@ where
         let sender = self.sender.clone();
         let initial_inputs = self.device.initial_inputs();
         let environment_blend_mode = self.device.environment_blend_mode();
+        let granted_features = self.device.granted_features().into();
         Session {
             floor_transform,
             views,
@@ -196,6 +239,7 @@ where
             sender,
             initial_inputs,
             environment_blend_mode,
+            granted_features,
         }
     }
 
