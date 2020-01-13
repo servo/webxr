@@ -88,6 +88,7 @@ pub struct MockInputInit {
 pub enum MockInputMsg {
     SetHandedness(Handedness),
     SetTargetRayMode(TargetRayMode),
+    SetProfiles(Vec<String>),
     SetPointerOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     SetGripOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     /// Note: SelectEvent::Select here refers to a complete Select event,

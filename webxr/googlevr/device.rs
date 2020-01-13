@@ -587,6 +587,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
                 id: InputId(0),
                 target_ray_mode: TargetRayMode::TrackedPointer,
                 supports_grip: false,
+                profiles: vec!["google-daydream".into(), "generic-touchpad".into()],
             }]
         } else {
             vec![]

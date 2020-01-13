@@ -263,7 +263,7 @@ impl HeadlessDeviceData {
             MockDeviceMsg::VisibilityChange(v) => self.events.callback(Event::VisibilityChange(v)),
             MockDeviceMsg::AddInputSource(init) => {
                 self.inputs.push(InputInfo {
-                    source: init.source,
+                    source: init.source.clone(),
                     pointer: init.pointer_origin,
                     grip: init.grip_origin,
                     active: true,
@@ -276,11 +276,15 @@ impl HeadlessDeviceData {
                     match msg {
                         MockInputMsg::SetHandedness(h) => {
                             input.source.handedness = h;
-                            self.events.callback(Event::UpdateInput(id, input.source));
+                            self.events.callback(Event::UpdateInput(id, input.source.clone()));
+                        }
+                        MockInputMsg::SetProfiles(p) => {
+                            input.source.profiles = p;
+                            self.events.callback(Event::UpdateInput(id, input.source.clone()));
                         }
                         MockInputMsg::SetTargetRayMode(t) => {
                             input.source.target_ray_mode = t;
-                            self.events.callback(Event::UpdateInput(id, input.source));
+                            self.events.callback(Event::UpdateInput(id, input.source.clone()));
                         }
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
                         MockInputMsg::SetGripOrigin(p) => input.grip = p,
@@ -337,7 +341,7 @@ impl HeadlessDeviceData {
                         }
                         MockInputMsg::Reconnect => {
                             if !input.active {
-                                self.events.callback(Event::AddInput(input.source));
+                                self.events.callback(Event::AddInput(input.source.clone()));
                                 input.active = true;
                             }
                         }
