@@ -274,8 +274,14 @@ impl HeadlessDeviceData {
             MockDeviceMsg::MessageInputSource(id, msg) => {
                 if let Some(ref mut input) = self.inputs.iter_mut().find(|i| i.source.id == id) {
                     match msg {
-                        MockInputMsg::SetHandedness(h) => input.source.handedness = h,
-                        MockInputMsg::SetTargetRayMode(t) => input.source.target_ray_mode = t,
+                        MockInputMsg::SetHandedness(h) => {
+                            input.source.handedness = h;
+                            self.events.callback(Event::UpdateInput(id, input.source));
+                        }
+                        MockInputMsg::SetTargetRayMode(t) => {
+                            input.source.target_ray_mode = t;
+                            self.events.callback(Event::UpdateInput(id, input.source));
+                        }
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
                         MockInputMsg::SetGripOrigin(p) => input.grip = p,
                         MockInputMsg::TriggerSelect(kind, event) => {
