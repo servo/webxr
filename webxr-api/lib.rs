@@ -103,7 +103,7 @@ pub use ipc_channel::ipc::channel;
 pub use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 
 #[cfg(not(feature = "ipc"))]
-fn channel<T>() -> Result<(Sender<T>, Receiver<T>), ()> {
+pub fn channel<T>() -> Result<(Sender<T>, Receiver<T>), ()> {
     Ok(std::sync::mpsc::channel())
 }
 
