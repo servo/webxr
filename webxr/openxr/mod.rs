@@ -41,6 +41,7 @@ use webxr_api::Quitter;
 use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
+use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
@@ -103,12 +104,14 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
     fn request_session(
         &mut self,
         mode: SessionMode,
+        init: &SessionInit,
         xr: SessionBuilder,
     ) -> Result<WebXrSession, Error> {
         let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
         if self.supports_session(mode) {
             let gl = self.gl.clone();
-            xr.run_on_main_thread(move || OpenXrDevice::new(gl, instance))
+            let granted_features = init.validate(mode, &["local-floor".into()])?;
+            xr.run_on_main_thread(move || OpenXrDevice::new(gl, instance, granted_features))
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -148,6 +151,7 @@ struct OpenXrDevice {
     action_set: ActionSet,
     right_hand: OpenXRInput,
     left_hand: OpenXRInput,
+    granted_features: Vec<String>,
 }
 
 struct AutoDestroyContext {
@@ -175,7 +179,11 @@ impl Drop for AutoDestroyContext {
 }
 
 impl OpenXrDevice {
-    fn new(gl: Rc<dyn Gl>, instance: Instance) -> Result<OpenXrDevice, Error> {
+    fn new(
+        gl: Rc<dyn Gl>,
+        instance: Instance,
+        granted_features: Vec<String>,
+    ) -> Result<OpenXrDevice, Error> {
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
@@ -334,6 +342,7 @@ impl OpenXrDevice {
             action_set,
             right_hand,
             left_hand,
+            granted_features,
         })
     }
 
@@ -671,12 +680,16 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 id: InputId(0),
                 target_ray_mode: TargetRayMode::TrackedPointer,
                 supports_grip: true,
+                // XXXManishearth update with whatever we decide
+                // in https://github.com/immersive-web/webxr-input-profiles/issues/105
+                profiles: vec!["generic-hand".into()],
             },
             InputSource {
                 handedness: Handedness::Left,
                 id: InputId(1),
                 target_ray_mode: TargetRayMode::TrackedPointer,
                 supports_grip: true,
+                profiles: vec!["generic-hand".into()],
             },
         ]
     }
@@ -701,6 +714,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
     fn environment_blend_mode(&self) -> webxr_api::EnvironmentBlendMode {
         webxr_api::EnvironmentBlendMode::Additive
+    }
+
+    fn granted_features(&self) -> &[String] {
+        &self.granted_features
     }
 }
 

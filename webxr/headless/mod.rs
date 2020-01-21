@@ -29,6 +29,7 @@ use webxr_api::Receiver;
 use webxr_api::SelectEvent;
 use webxr_api::Sender;
 use webxr_api::Session;
+use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewer;
@@ -60,11 +61,13 @@ struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
     mode: SessionMode,
     clip_planes: ClipPlanes,
+    granted_features: Vec<String>,
 }
 
 struct HeadlessDeviceData {
     floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
     viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
+    supported_features: Vec<String>,
     views: MockViewsInit,
     needs_view_update: bool,
     needs_floor_update: bool,
@@ -86,6 +89,7 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
         let data = HeadlessDeviceData {
             floor_transform,
             viewer_origin,
+            supported_features: init.supported_features,
             views,
             needs_view_update: false,
             needs_floor_update: false,
@@ -116,17 +120,24 @@ fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceDat
 }
 
 impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        init: &SessionInit,
+        xr: SessionBuilder,
+    ) -> Result<Session, Error> {
         if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
         let data = self.data.clone();
         let clip_planes = Default::default();
+        let granted_features = init.validate(mode, &data.lock().unwrap().supported_features)?;
         xr.run_on_main_thread(move || {
             Ok(HeadlessDevice {
                 data,
                 mode,
                 clip_planes,
+                granted_features,
             })
         })
     }
@@ -214,6 +225,10 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         self.clip_planes.update(near, far);
         self.data.lock().unwrap().needs_view_update = true;
     }
+
+    fn granted_features(&self) -> &[String] {
+        &self.granted_features
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -263,7 +278,7 @@ impl HeadlessDeviceData {
             MockDeviceMsg::VisibilityChange(v) => self.events.callback(Event::VisibilityChange(v)),
             MockDeviceMsg::AddInputSource(init) => {
                 self.inputs.push(InputInfo {
-                    source: init.source,
+                    source: init.source.clone(),
                     pointer: init.pointer_origin,
                     grip: init.grip_origin,
                     active: true,
@@ -274,8 +289,21 @@ impl HeadlessDeviceData {
             MockDeviceMsg::MessageInputSource(id, msg) => {
                 if let Some(ref mut input) = self.inputs.iter_mut().find(|i| i.source.id == id) {
                     match msg {
-                        MockInputMsg::SetHandedness(h) => input.source.handedness = h,
-                        MockInputMsg::SetTargetRayMode(t) => input.source.target_ray_mode = t,
+                        MockInputMsg::SetHandedness(h) => {
+                            input.source.handedness = h;
+                            self.events
+                                .callback(Event::UpdateInput(id, input.source.clone()));
+                        }
+                        MockInputMsg::SetProfiles(p) => {
+                            input.source.profiles = p;
+                            self.events
+                                .callback(Event::UpdateInput(id, input.source.clone()));
+                        }
+                        MockInputMsg::SetTargetRayMode(t) => {
+                            input.source.target_ray_mode = t;
+                            self.events
+                                .callback(Event::UpdateInput(id, input.source.clone()));
+                        }
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
                         MockInputMsg::SetGripOrigin(p) => input.grip = p,
                         MockInputMsg::TriggerSelect(kind, event) => {
@@ -331,7 +359,7 @@ impl HeadlessDeviceData {
                         }
                         MockInputMsg::Reconnect => {
                             if !input.active {
-                                self.events.callback(Event::AddInput(input.source));
+                                self.events.callback(Event::AddInput(input.source.clone()));
                                 input.active = true;
                             }
                         }

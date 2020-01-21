@@ -58,6 +58,7 @@ pub use session::MainThreadSession;
 pub use session::Quitter;
 pub use session::Session;
 pub use session::SessionBuilder;
+pub use session::SessionInit;
 pub use session::SessionMode;
 pub use session::SessionThread;
 

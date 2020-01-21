@@ -16,6 +16,8 @@ pub enum Event {
     AddInput(InputSource),
     /// Input source disconnected
     RemoveInput(InputId),
+    /// Input updated (this is a disconnect+reconnect)
+    UpdateInput(InputId, InputSource),
     /// Session ended by device
     SessionEnd,
     /// Session focused/blurred/etc

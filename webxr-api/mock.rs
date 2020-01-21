@@ -44,6 +44,7 @@ pub struct MockDeviceInit {
     pub supports_unbounded: bool,
     pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     pub views: MockViewsInit,
+    pub supported_features: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +89,7 @@ pub struct MockInputInit {
 pub enum MockInputMsg {
     SetHandedness(Handedness),
     SetTargetRayMode(TargetRayMode),
+    SetProfiles(Vec<String>),
     SetPointerOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     SetGripOrigin(Option<RigidTransform3D<f32, Input, Native>>),
     /// Note: SelectEvent::Select here refers to a complete Select event,

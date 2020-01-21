@@ -14,5 +14,6 @@ use serde::{Deserialize, Serialize};
 pub enum Error {
     NoMatchingDevice,
     CommunicationError,
+    UnsupportedFeature(String),
     BackendSpecific(String),
 }

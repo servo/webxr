@@ -27,13 +27,14 @@ pub enum TargetRayMode {
     Screen,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputSource {
     pub handedness: Handedness,
     pub target_ray_mode: TargetRayMode,
     pub id: InputId,
     pub supports_grip: bool,
+    pub profiles: Vec<String>,
 }
 
 #[derive(Copy, Clone, Debug)]

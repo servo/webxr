@@ -78,6 +78,7 @@ use webxr_api::Receiver;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionBuilder;
+use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewer;
@@ -103,6 +104,7 @@ pub struct MagicLeapDevice {
     frame_handle: MLHandle,
     cameras: MLGraphicsVirtualCameraInfoArray,
     view_update_needed: bool,
+    granted_features: Vec<String>,
 }
 
 impl MagicLeapDiscovery {
@@ -116,24 +118,36 @@ impl Discovery for MagicLeapDiscovery {
         mode == SessionMode::ImmersiveVR || mode == SessionMode::ImmersiveAR
     }
 
-    fn request_session(&mut self, mode: SessionMode, xr: SessionBuilder) -> Result<Session, Error> {
+    fn request_session(
+        &mut self,
+        mode: SessionMode,
+        init: &SessionInit,
+        xr: SessionBuilder,
+    ) -> Result<Session, Error> {
         if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
         }
+        let granted_features = init.validate(mode, &["local-floor".into()])?;
         let egl = self.egl;
         let gl = self.gl.clone();
-        xr.run_on_main_thread(move || match MagicLeapDevice::new(egl, gl) {
-            Ok(device) => Ok(device),
-            Err(err) => {
-                warn!("Failed to start Magic Leap XR ({})", String::from(err));
-                Err(Error::NoMatchingDevice)
-            }
-        })
+        xr.run_on_main_thread(
+            move || match MagicLeapDevice::new(egl, gl, granted_features) {
+                Ok(device) => Ok(device),
+                Err(err) => {
+                    warn!("Failed to start Magic Leap XR ({})", String::from(err));
+                    Err(Error::NoMatchingDevice)
+                }
+            },
+        )
     }
 }
 
 impl MagicLeapDevice {
-    fn new(egl: EGLContext, gl: Rc<dyn Gl>) -> Result<MagicLeapDevice, MLResult> {
+    fn new(
+        egl: EGLContext,
+        gl: Rc<dyn Gl>,
+        granted_features: Vec<String>,
+    ) -> Result<MagicLeapDevice, MLResult> {
         info!("Creating MagicLeapDevice");
 
         let options = MLGraphicsOptions {
@@ -175,6 +189,7 @@ impl MagicLeapDevice {
             frame_handle,
             cameras,
             view_update_needed: false,
+            granted_features,
         };
 
         // Rather annoyingly, in order for the views to be available, we have to
@@ -474,5 +489,9 @@ impl Device for MagicLeapDevice {
     fn update_clip_planes(&mut self, _near: f32, _far: f32) {
         self.view_update_needed = true;
         // XXXManishearth tell the device about the new clip planes
+    }
+
+    fn granted_features(&self) -> &[String] {
+        &self.granted_features
     }
 }

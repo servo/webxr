@@ -15,6 +15,7 @@ use crate::Quitter;
 use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
+use crate::SessionInit;
 use crate::SessionMode;
 use crate::Viewport;
 use crate::Views;
@@ -27,6 +28,7 @@ pub trait DiscoveryAPI<SwapChains>: 'static {
     fn request_session(
         &mut self,
         mode: SessionMode,
+        init: &SessionInit,
         xr: SessionBuilder<SwapChains>,
     ) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
@@ -78,15 +80,18 @@ pub trait DeviceAPI<Surface>: 'static {
         // for VR devices, override for AR
         EnvironmentBlendMode::Opaque
     }
+
+    fn granted_features(&self) -> &[String];
 }
 
 impl<SwapChains: 'static> DiscoveryAPI<SwapChains> for Box<dyn DiscoveryAPI<SwapChains>> {
     fn request_session(
         &mut self,
         mode: SessionMode,
+        init: &SessionInit,
         xr: SessionBuilder<SwapChains>,
     ) -> Result<Session, Error> {
-        (&mut **self).request_session(mode, xr)
+        (&mut **self).request_session(mode, init, xr)
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
