@@ -51,7 +51,7 @@ use winapi::shared::dxgiformat;
 mod input;
 use input::OpenXRInput;
 
-const HEIGHT: f32 = 1.0;
+const HEIGHT: f32 = 1.4;
 
 pub struct OpenXrDiscovery {
     gl: Rc<dyn Gl>,
@@ -378,7 +378,7 @@ impl OpenXrDevice {
 
 impl DeviceAPI<Surface> for OpenXrDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
-        let translation = Vector3D::new(HEIGHT, 0.0, 0.0);
+        let translation = Vector3D::new(0.0, HEIGHT, 0.0);
         Some(RigidTransform3D::from_translation(translation))
     }
 
