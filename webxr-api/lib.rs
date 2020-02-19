@@ -114,7 +114,10 @@ pub fn recv_timeout<T>(receiver: &Receiver<T>, timeout: Duration) -> Result<T, R
 }
 
 #[cfg(feature = "ipc")]
-pub fn recv_timeout<T>(receiver: &Receiver<T>, timeout: Duration) -> Result<T, ipc_channel::Error>
+pub fn recv_timeout<T>(
+    receiver: &Receiver<T>,
+    timeout: Duration,
+) -> Result<T, ipc_channel::ipc::TryRecvError>
 where
     T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
