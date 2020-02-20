@@ -12,6 +12,7 @@ script:
   - cd webxr
   - cargo build --features=glwindow,headless,googlevr
   - cargo build --features=ipc,glwindow,headless,googlevr
+  - cargo build --features=glwindow,headless,profile
   - rustup target add arm-linux-androideabi
   - cargo build --target arm-linux-androideabi --features=ipc,googlevr
   - rustup target add aarch64-pc-windows-msvc

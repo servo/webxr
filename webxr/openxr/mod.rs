@@ -468,6 +468,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             inputs: vec![right_input_frame, left_input_frame],
             events,
             time_ns,
+            sent_time: 0,
         };
 
         if let Some(right_select) = right_select {

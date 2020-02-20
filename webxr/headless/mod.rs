@@ -259,6 +259,7 @@ impl HeadlessDeviceData {
             inputs,
             events: vec![],
             time_ns,
+            sent_time: 0,
         }
     }
 
