@@ -141,6 +141,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             inputs: vec![],
             events,
             time_ns,
+            sent_time: 0,
         })
     }
 

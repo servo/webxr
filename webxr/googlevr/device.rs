@@ -565,6 +565,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
             inputs: self.input_state(),
             events,
             time_ns,
+            sent_time: 0,
         })
     }
 

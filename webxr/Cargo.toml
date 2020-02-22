@@ -30,6 +30,7 @@ ipc = ["webxr-api/ipc", "serde"]
 googlevr = ["gvr-sys", "android_injected_glue", "gles"]
 magicleap = ["egl"]
 openxr-api = ["angle", "openxr", "winapi", "wio"]
+profile = ["webxr-api/profile"]
 
 [dependencies]
 webxr-api = { path = "../webxr-api" }

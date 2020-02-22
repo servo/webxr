@@ -20,6 +20,7 @@ path = "lib.rs"
 
 [features]
 ipc = ["serde", "ipc-channel", "euclid/serde"]
+profile = ["time"]
 
 [dependencies]
 euclid = "0.20"
@@ -29,3 +30,4 @@ log = "0.4"
 serde = { version = "1.0", optional = true }
 # winit 0.19.4 doesn't compile for android
 winit = "= 0.19.3"
+time = { version = "0.1", optional = true }

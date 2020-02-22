@@ -424,6 +424,7 @@ impl Device for MagicLeapDevice {
             inputs,
             events,
             time_ns,
+            sent_time: 0,
         })
     }
 

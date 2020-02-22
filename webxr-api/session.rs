@@ -79,6 +79,11 @@ impl SessionInit {
     }
 }
 
+#[cfg(feature = "profile")]
+fn to_ms(ns: u64) -> f64 {
+    ns as f64 / 1_000_000.
+}
+
 /// https://immersive-web.github.io/webxr-ar-module/#xrenvironmentblendmode-enum
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
@@ -95,7 +100,7 @@ enum SessionMsg {
     SetEventDest(Sender<Event>),
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
     StartRenderLoop,
-    RenderAnimationFrame,
+    RenderAnimationFrame(/* request time */ u64),
     Quit,
 }
 
@@ -164,7 +169,13 @@ impl Session {
     }
 
     pub fn render_animation_frame(&mut self) {
-        let _ = self.sender.send(SessionMsg::RenderAnimationFrame);
+        #[allow(unused)]
+        let mut time = 0;
+        #[cfg(feature = "profile")]
+        {
+            time = time::precise_time_ns();
+        }
+        let _ = self.sender.send(SessionMsg::RenderAnimationFrame(time));
     }
 
     pub fn end_session(&mut self) {
@@ -276,21 +287,52 @@ where
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
-            SessionMsg::RenderAnimationFrame => {
+            SessionMsg::RenderAnimationFrame(_sent_time) => {
                 self.frame_count += 1;
+                #[cfg(feature = "profile")]
+                let mut render_start = None;
                 if let Some(ref swap_chain) = self.swap_chain {
                     if let Some(surface) = swap_chain.take_surface() {
+                        #[cfg(feature = "profile")]
+                        {
+                            render_start = Some(time::precise_time_ns());
+                            println!(
+                                "WEBXR PROFILING [raf transmitted]:\t{}ms",
+                                to_ms(render_start.unwrap() - _sent_time)
+                            );
+                        }
                         let surface = self.device.render_animation_frame(surface);
                         swap_chain.recycle_surface(surface);
                     }
                 }
-                let frame = match self.device.wait_for_animation_frame() {
+                #[cfg(feature = "profile")]
+                let wait_start = time::precise_time_ns();
+                #[cfg(feature = "profile")]
+                {
+                    if let Some(render_start) = render_start {
+                        println!(
+                            "WEBXR PROFILING [raf render]:\t{}ms",
+                            to_ms(wait_start - render_start)
+                        );
+                    }
+                }
+                #[allow(unused_mut)]
+                let mut frame = match self.device.wait_for_animation_frame() {
                     Some(frame) => frame,
                     None => {
                         warn!("Device stopped providing frames, exiting");
                         return false;
                     }
                 };
+                #[cfg(feature = "profile")]
+                {
+                    let wait_end = time::precise_time_ns();
+                    println!(
+                        "WEBXR PROFILING [raf wait]:\t{}ms",
+                        to_ms(wait_end - wait_start)
+                    );
+                    frame.sent_time = wait_end;
+                }
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::Quit => {
@@ -315,12 +357,22 @@ where
 {
     fn run_one_frame(&mut self) {
         let frame_count = self.frame_count;
+        #[cfg(feature = "profile")]
+        let start_run = time::precise_time_ns();
         while frame_count == self.frame_count && self.running {
             if let Ok(msg) = crate::recv_timeout(&self.receiver, TIMEOUT) {
                 self.running = self.handle_msg(msg);
             } else {
                 break;
             }
+        }
+        #[cfg(feature = "profile")]
+        {
+            let end_run = time::precise_time_ns();
+            println!(
+                "WEBXR PROFILING [run_one_frame]:\t{}ms",
+                to_ms(end_run - start_run)
+            );
         }
     }
 
