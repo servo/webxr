@@ -134,6 +134,7 @@ struct OpenXrDevice {
     frame_state: FrameState,
     space: Space,
     viewer_space: Space,
+    blend_mode: EnvironmentBlendMode,
     clip_planes: ClipPlanes,
     openxr_views: Vec<openxr::View>,
     view_configurations: Vec<openxr::ViewConfigurationView>,
@@ -248,9 +249,14 @@ impl OpenXrDevice {
             .create_reference_space(ReferenceSpaceType::VIEW, pose)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
+        let view_configuration_type = ViewConfigurationType::PRIMARY_STEREO;
         let view_configurations = instance
-            .enumerate_view_configuration_views(system, ViewConfigurationType::PRIMARY_STEREO)
+            .enumerate_view_configuration_views(system, view_configuration_type)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+
+        let blend_mode = instance
+            .enumerate_environment_blend_modes(system, view_configuration_type)
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?[0];
 
         let left_view_configuration = view_configurations[0];
         let right_view_configuration = view_configurations[1];
@@ -330,6 +336,7 @@ impl OpenXrDevice {
             left_extent,
             right_extent,
             openxr_views: vec![],
+            blend_mode,
             view_configurations,
             left_swapchain,
             right_swapchain,
@@ -624,7 +631,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         self.frame_stream
             .end(
                 self.frame_state.predicted_display_time,
-                EnvironmentBlendMode::ADDITIVE,
+                self.blend_mode,
                 &[&CompositionLayerProjection::new()
                     .space(&self.space)
                     .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
@@ -714,7 +721,12 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 
     fn environment_blend_mode(&self) -> webxr_api::EnvironmentBlendMode {
-        webxr_api::EnvironmentBlendMode::Additive
+        match self.blend_mode {
+            EnvironmentBlendMode::OPAQUE => webxr_api::EnvironmentBlendMode::Opaque,
+            EnvironmentBlendMode::ALPHA_BLEND => webxr_api::EnvironmentBlendMode::AlphaBlend,
+            EnvironmentBlendMode::ADDITIVE => webxr_api::EnvironmentBlendMode::Additive,
+            v => unimplemented!("unsupported blend mode: {:?}", v),
+        }
     }
 
     fn granted_features(&self) -> &[String] {
@@ -727,7 +739,6 @@ impl Drop for OpenXrDevice {
         let _ = self.surfman.0.destroy_context(&mut self.surfman.1);
     }
 }
-
 fn transform<Src, Dst>(pose: &Posef) -> RigidTransform3D<f32, Src, Dst> {
     let rotation = Rotation3D::quaternion(
         pose.orientation.x,
