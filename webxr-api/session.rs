@@ -128,9 +128,18 @@ pub struct Session {
     environment_blend_mode: EnvironmentBlendMode,
     initial_inputs: Vec<InputSource>,
     granted_features: Vec<String>,
+    id: SessionId,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Deserialize, Serialize))]
+pub struct SessionId(pub(crate) u32);
+
 impl Session {
+    pub fn id(&self) -> SessionId {
+        self.id
+    }
+
     pub fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.floor_transform.clone()
     }
@@ -204,6 +213,7 @@ pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
     frame_sender: Sender<Frame>,
     running: bool,
     device: Device,
+    id: SessionId,
 }
 
 impl<Device, SwapChains> SessionThread<Device, SwapChains>
@@ -215,6 +225,7 @@ where
         mut device: Device,
         swap_chains: SwapChains,
         frame_sender: Sender<Frame>,
+        id: SessionId,
     ) -> Result<Self, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         device.set_quitter(Quitter {
@@ -232,6 +243,7 @@ where
             frame_count,
             frame_sender,
             running,
+            id,
         })
     }
 
@@ -251,6 +263,7 @@ where
             initial_inputs,
             environment_blend_mode,
             granted_features,
+            id: self.id,
         }
     }
 
@@ -386,21 +399,28 @@ pub struct SessionBuilder<'a, SwapChains: 'a> {
     swap_chains: &'a SwapChains,
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
     frame_sender: Sender<Frame>,
+    id: SessionId,
 }
 
 impl<'a, SwapChains> SessionBuilder<'a, SwapChains>
 where
     SwapChains: SwapChainsAPI<SwapChainId>,
 {
+    pub fn id(&self) -> SessionId {
+        self.id
+    }
+
     pub(crate) fn new(
         swap_chains: &'a SwapChains,
         sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
         frame_sender: Sender<Frame>,
+        id: SessionId,
     ) -> Self {
         SessionBuilder {
             swap_chains,
             sessions,
             frame_sender,
+            id,
         }
     }
 
@@ -413,8 +433,10 @@ where
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
         let swap_chains = self.swap_chains.clone();
         let frame_sender = self.frame_sender.clone();
+        let id = self.id;
         thread::spawn(move || {
-            match factory().and_then(|device| SessionThread::new(device, swap_chains, frame_sender))
+            match factory()
+                .and_then(|device| SessionThread::new(device, swap_chains, frame_sender, id))
             {
                 Ok(mut thread) => {
                     let session = thread.new_session();
@@ -438,7 +460,7 @@ where
         let device = factory()?;
         let swap_chains = self.swap_chains.clone();
         let frame_sender = self.frame_sender.clone();
-        let mut session_thread = SessionThread::new(device, swap_chains, frame_sender)?;
+        let mut session_thread = SessionThread::new(device, swap_chains, frame_sender, self.id)?;
         let session = session_thread.new_session();
         self.sessions.push(Box::new(session_thread));
         Ok(session)

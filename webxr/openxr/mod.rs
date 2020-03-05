@@ -8,7 +8,6 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
-use gleam::gl::{self, GLuint, Gl};
 use log::warn;
 use openxr::d3d::{SessionCreateInfo, D3D11};
 use openxr::Graphics;
@@ -19,10 +18,10 @@ use openxr::{
     Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
     Vector3f, ViewConfigurationType,
 };
-use std::rc::Rc;
-use surfman::platform::generic::universal::context::Context as SurfmanContext;
+use std::sync::{Arc, Mutex};
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
+use surfman_chains::SurfaceProvider;
 use webxr_api;
 use webxr_api::util::{self, ClipPlanes};
 use webxr_api::DeviceAPI;
@@ -41,6 +40,7 @@ use webxr_api::Quitter;
 use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
+use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::TargetRayMode;
@@ -53,13 +53,30 @@ use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.4;
 
+pub trait GlThread: Send {
+    fn execute(&self, runnable: Box<dyn FnOnce() + Send>);
+    fn clone(&self) -> Box<dyn GlThread>;
+}
+
+pub trait SurfaceProviderRegistration: Send {
+    fn register(&self, id: SessionId, provider: Box<dyn SurfaceProvider + Send>);
+    fn clone(&self) -> Box<dyn SurfaceProviderRegistration>;
+}
+
 pub struct OpenXrDiscovery {
-    gl: Rc<dyn Gl>,
+    gl_thread: Box<dyn GlThread>,
+    provider_registration: Box<dyn SurfaceProviderRegistration>,
 }
 
 impl OpenXrDiscovery {
-    pub fn new(gl: Rc<dyn Gl>) -> Self {
-        Self { gl }
+    pub fn new(
+        gl_thread: Box<dyn GlThread>,
+        provider_registration: Box<dyn SurfaceProviderRegistration>,
+    ) -> Self {
+        Self {
+            gl_thread,
+            provider_registration,
+        }
     }
 }
 
@@ -109,9 +126,19 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
     ) -> Result<WebXrSession, Error> {
         let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
         if self.supports_session(mode) {
-            let gl = self.gl.clone();
+            let gl_thread = self.gl_thread.clone();
+            let provider_registration = self.provider_registration.clone();
             let granted_features = init.validate(mode, &["local-floor".into()])?;
-            xr.run_on_main_thread(move || OpenXrDevice::new(gl, instance, granted_features))
+            let id = xr.id();
+            xr.spawn(move || {
+                OpenXrDevice::new(
+                    gl_thread,
+                    provider_registration,
+                    instance,
+                    granted_features,
+                    id,
+                )
+            })
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -124,29 +151,14 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
 
 struct OpenXrDevice {
     instance: Instance,
-    gl: Rc<dyn Gl>,
-    read_fbo: GLuint,
-    write_fbo: GLuint,
     events: EventBuffer,
     session: Session<D3D11>,
     frame_waiter: FrameWaiter,
-    frame_stream: FrameStream<D3D11>,
-    frame_state: FrameState,
-    space: Space,
+    shared_data: Arc<Mutex<SharedData>>,
     viewer_space: Space,
     blend_mode: EnvironmentBlendMode,
     clip_planes: ClipPlanes,
-    openxr_views: Vec<openxr::View>,
     view_configurations: Vec<openxr::ViewConfigurationView>,
-    left_extent: Extent2Di,
-    right_extent: Extent2Di,
-    left_swapchain: Swapchain<D3D11>,
-    left_image: u32,
-    left_images: Vec<<D3D11 as Graphics>::SwapchainImage>,
-    right_swapchain: Swapchain<D3D11>,
-    right_image: u32,
-    right_images: Vec<<D3D11 as Graphics>::SwapchainImage>,
-    surfman: (SurfmanDevice, SurfmanContext),
 
     // input
     action_set: ActionSet,
@@ -155,41 +167,223 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
 }
 
-struct AutoDestroyContext {
-    surfman: Option<(SurfmanDevice, SurfmanContext)>,
+/// Data that is shared between the openxr thread and the
+/// surface provider that runs in the webgl thread.
+struct SharedData {
+    openxr_views: Vec<openxr::View>,
+    frame_state: FrameState,
+    frame_stream: FrameStream<D3D11>,
+    left_extent: Extent2Di,
+    right_extent: Extent2Di,
+    space: Space,
 }
 
-impl AutoDestroyContext {
-    fn new(surfman: (SurfmanDevice, SurfmanContext)) -> AutoDestroyContext {
-        AutoDestroyContext {
-            surfman: Some(surfman),
-        }
-    }
-
-    fn extract(mut self) -> (SurfmanDevice, SurfmanContext) {
-        self.surfman.take().unwrap()
-    }
+struct OpenXrProvider {
+    images: Box<[<D3D11 as Graphics>::SwapchainImage]>,
+    image_queue: Vec<usize>,
+    surfaces: Box<[Option<Surface>]>,
+    swapchain: Swapchain<D3D11>,
+    shared_data: Arc<Mutex<SharedData>>,
+    fake_surface: Option<Surface>,
+    blend_mode: EnvironmentBlendMode,
 }
 
-impl Drop for AutoDestroyContext {
-    fn drop(&mut self) {
-        if let Some((device, mut context)) = self.surfman.take() {
-            let _ = device.destroy_context(&mut context);
+// This is required due to the presence of the swapchain image
+// pointers in the struct. D3D11 resources like textures are
+// safe to send between threads.
+unsafe impl Send for OpenXrProvider {}
+
+impl SurfaceProvider for OpenXrProvider {
+    fn recycle_front_buffer(
+        &mut self,
+        _device: &mut surfman::Device,
+        _context_id: surfman::ContextID,
+    ) {
+        // At this point the frame contents have been rendered, so we can release access to the texture
+        // in preparation for displaying it.
+        let mut data = self.shared_data.lock().unwrap();
+        let data = &mut *data;
+        self.swapchain.release_image().unwrap();
+
+        // Invert the up/down angles so that openxr flips the texture in the y axis.
+        let mut l_fov = data.openxr_views[0].fov;
+        let mut r_fov = data.openxr_views[1].fov;
+        std::mem::swap(&mut l_fov.angle_up, &mut l_fov.angle_down);
+        std::mem::swap(&mut r_fov.angle_up, &mut r_fov.angle_down);
+
+        let views = [
+            openxr::CompositionLayerProjectionView::new()
+                .pose(data.openxr_views[0].pose)
+                .fov(l_fov)
+                .sub_image(
+                    openxr::SwapchainSubImage::new()
+                        .swapchain(&self.swapchain)
+                        .image_array_index(0)
+                        .image_rect(openxr::Rect2Di {
+                            offset: openxr::Offset2Di { x: 0, y: 0 },
+                            extent: data.left_extent,
+                        }),
+                ),
+            openxr::CompositionLayerProjectionView::new()
+                .pose(data.openxr_views[1].pose)
+                .fov(r_fov)
+                .sub_image(
+                    openxr::SwapchainSubImage::new()
+                        .swapchain(&self.swapchain)
+                        .image_array_index(0)
+                        .image_rect(openxr::Rect2Di {
+                            offset: openxr::Offset2Di {
+                                x: data.left_extent.width,
+                                y: 0,
+                            },
+                            extent: data.right_extent,
+                        }),
+                ),
+        ];
+
+        let layers = [&*CompositionLayerProjection::new()
+            .space(&data.space)
+            .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+            .views(&views[..])];
+
+        data.frame_stream
+            .end(
+                data.frame_state.predicted_display_time,
+                self.blend_mode,
+                &layers[..],
+            )
+            .unwrap();
+    }
+
+    fn recycle_surface(&mut self, surface: Surface) {
+        assert!(self.fake_surface.is_none());
+        self.fake_surface = Some(surface);
+    }
+
+    fn provide_surface(
+        &mut self,
+        device: &mut surfman::Device,
+        context: &mut surfman::Context,
+        _context_id: surfman::ContextID,
+        size: euclid::default::Size2D<i32>,
+    ) -> Result<Surface, surfman::Error> {
+        let image = self.swapchain.acquire_image().unwrap();
+        self.swapchain
+            .wait_image(openxr::Duration::INFINITE)
+            .unwrap();
+
+        // Store the current image index that was acquired in the queue of
+        // surfaces that have been handed out.
+        self.image_queue.push(image as usize);
+
+        // If we already have a surface, we can return it immediately.
+        // Otherwise we need to create a new surface that wraps the
+        // OpenXR texture.
+        let surface = self.surfaces[image as usize]
+            .take()
+            .ok_or(surfman::Error::SurfaceDataInaccessible)
+            .or_else(|_| unsafe {
+                device.create_surface_from_texture(
+                    context,
+                    &Size2D::new(size.width, size.height),
+                    self.images[image as usize],
+                )
+            });
+        surface
+    }
+
+    fn take_front_buffer(&mut self) -> Option<Surface> {
+        self.fake_surface.take()
+    }
+
+    fn set_front_buffer(
+        &mut self,
+        device: &mut surfman::Device,
+        context: &mut surfman::Context,
+        _context_id: surfman::ContextID,
+        new_front_buffer: Surface,
+    ) -> Result<(), surfman::Error> {
+        // At this point the front buffer's contents are already present in the underlying openxr texture.
+        // We only need to store the surface because the webxr crate's API assumes that Surface objects
+        // must be passed to the rendering method.
+
+        // Return the complete surface to the surface cache in the position corresponding
+        // to the front of the outstanding surface queue.
+        let pending_idx = self.image_queue[0];
+        assert!(self.surfaces[pending_idx].is_none());
+        self.surfaces[pending_idx] = Some(new_front_buffer);
+        // Remove the first element of the queue of outstanding surfaces.
+        self.image_queue.remove(0);
+
+        // We will be handing out a threadsafe surface in the future, so we need
+        // to create it if it doesn't already exist.
+        if self.fake_surface.is_none() {
+            self.fake_surface = Some(device.create_surface(
+                context,
+                surfman::SurfaceAccess::GPUOnly,
+                &surfman::SurfaceType::Generic {
+                    size: Size2D::new(1, 1),
+                },
+            )?);
         }
+
+        Ok(())
+    }
+
+    fn create_sized_surface(
+        &mut self,
+        _device: &mut surfman::Device,
+        _context: &mut surfman::Context,
+        _size: euclid::default::Size2D<i32>,
+    ) -> Result<Surface, surfman::Error> {
+        // All OpenXR-based surfaces are created once during session initialization; we cannot create new ones.
+        // This is only used when resizing, however, and OpenXR-based systems don't resize.
+        Err(surfman::Error::UnsupportedOnThisPlatform)
+    }
+
+    fn destroy_all_surfaces(
+        &mut self,
+        device: &mut surfman::Device,
+        context: &mut surfman::Context,
+    ) -> Result<(), surfman::Error> {
+        // Destroy any cached surfaces that wrap OpenXR textures.
+        for surface in self.surfaces.iter_mut().map(Option::take) {
+            if let Some(surface) = surface {
+                device.destroy_surface(context, surface)?;
+            }
+        }
+        if let Some(fake) = self.fake_surface.take() {
+            device.destroy_surface(context, fake)?;
+        }
+        Ok(())
     }
 }
 
 impl OpenXrDevice {
     fn new(
-        gl: Rc<dyn Gl>,
+        gl_thread: Box<dyn GlThread>,
+        provider_registration: Box<dyn SurfaceProviderRegistration>,
         instance: Instance,
         granted_features: Vec<String>,
+        id: SessionId,
     ) -> Result<OpenXrDevice, Error> {
-        let read_fbo = gl.gen_framebuffers(1)[0];
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-
-        let write_fbo = gl.gen_framebuffers(1)[0];
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+        let (device_tx, device_rx) = crossbeam_channel::unbounded();
+        let (provider_tx, provider_rx) = crossbeam_channel::unbounded();
+        let _ = gl_thread.execute(Box::new(move || {
+            // Get the current surfman device and extract it's D3D device. This will ensure
+            // that the OpenXR runtime's texture will be shareable with surfman's surfaces.
+            let (device, mut context) = unsafe {
+                SurfmanDevice::from_current_context().expect("Failed to create graphics context!")
+            };
+            device.destroy_context(&mut context).unwrap();
+            let d3d_device = device.d3d11_device();
+            // Smuggle the pointer out as a usize value; D3D11 devices are threadsafe
+            // so it's safe to use it from another thread.
+            let _ = device_tx.send(d3d_device.as_raw() as usize);
+            let _ = provider_rx.recv();
+        }));
+        // Get the D3D11 device pointer from the webgl thread.
+        let device = device_rx.recv().unwrap();
 
         let system = instance
             .system(FormFactor::HEAD_MOUNTED_DISPLAY)
@@ -203,20 +397,12 @@ impl OpenXrDevice {
         let _requirements = D3D11::requirements(&instance, system)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        // Get the current surfman device and extract it's D3D device. This will ensure
-        // that the OpenXR runtime's texture will be shareable with surfman's surfaces.
-        let surfman = unsafe {
-            SurfmanDevice::from_current_context().expect("Failed to create graphics context!")
-        };
-        let device = surfman.0.d3d11_device();
-        let surfman = AutoDestroyContext::new(surfman);
-
         let (session, mut frame_waiter, frame_stream) = unsafe {
             instance
                 .create_session::<D3D11>(
                     system,
                     &SessionCreateInfo {
-                        device: device.as_raw(),
+                        device: device as *mut _,
                     },
                 )
                 .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?
@@ -279,31 +465,57 @@ impl OpenXrDevice {
             .enumerate_swapchain_formats()
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
         let format = pick_format(&formats);
+        assert_eq!(
+            left_view_configuration.recommended_image_rect_height,
+            right_view_configuration.recommended_image_rect_height,
+        );
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
             format,
             sample_count: 1,
-            // XXXManishearth what if the recommended widths are different?
-            width: left_view_configuration.recommended_image_rect_width,
+            width: left_view_configuration.recommended_image_rect_width
+                + right_view_configuration.recommended_image_rect_width,
             height: left_view_configuration.recommended_image_rect_height,
             face_count: 1,
             array_size: 1,
             mip_count: 1,
         };
 
-        let left_swapchain = session
+        let swapchain = session
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
-        let left_images = left_swapchain
+        let images = swapchain
             .enumerate_images()
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
-        let right_swapchain = session
-            .create_swapchain(&swapchain_create_info)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
-        let right_images = right_swapchain
-            .enumerate_images()
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+
+        let mut surfaces = Vec::with_capacity(images.len());
+        for _ in 0..images.len() {
+            surfaces.push(None);
+        }
+
+        let shared_data = Arc::new(Mutex::new(SharedData {
+            frame_stream,
+            frame_state,
+            space,
+            openxr_views: vec![],
+            left_extent,
+            right_extent,
+        }));
+
+        let provider = Box::new(OpenXrProvider {
+            swapchain,
+            image_queue: Vec::with_capacity(images.len()),
+            images: images.into_boxed_slice(),
+            surfaces: surfaces.into_boxed_slice(),
+            fake_surface: None,
+            shared_data: shared_data.clone(),
+            blend_mode,
+        });
+        provider_registration.register(id, provider);
+        // Ensure the webgl thread is blocked until we're done initializing
+        // the surface provider.
+        let _ = provider_tx.send(());
 
         // input
 
@@ -323,28 +535,13 @@ impl OpenXrDevice {
         Ok(OpenXrDevice {
             instance,
             events: Default::default(),
-            gl,
-            read_fbo,
-            write_fbo,
             session,
-            frame_stream,
             frame_waiter,
-            frame_state,
-            space,
             viewer_space,
             clip_planes: Default::default(),
-            left_extent,
-            right_extent,
-            openxr_views: vec![],
             blend_mode,
             view_configurations,
-            left_swapchain,
-            right_swapchain,
-            left_images,
-            right_images,
-            left_image: 0,
-            right_image: 0,
-            surfman: surfman.extract(),
+            shared_data,
 
             action_set,
             right_hand,
@@ -396,7 +593,11 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .session
             .locate_views(
                 ViewConfigurationType::PRIMARY_STEREO,
-                self.frame_state.predicted_display_time,
+                self.shared_data
+                    .lock()
+                    .unwrap()
+                    .frame_state
+                    .predicted_display_time,
                 &self.viewer_space,
             )
             .expect("error locating views");
@@ -436,28 +637,29 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             // Session is not running anymore.
             return None;
         }
-        self.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        let mut data = self.shared_data.lock().unwrap();
+        data.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
         let time_ns = time::precise_time_ns();
+
+        data.frame_stream
+            .begin()
+            .expect("failed to start frame stream");
+
         // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, views) = self
             .session
             .locate_views(
                 ViewConfigurationType::PRIMARY_STEREO,
-                self.frame_state.predicted_display_time,
-                &self.space,
+                data.frame_state.predicted_display_time,
+                &data.space,
             )
             .expect("error locating views");
-        self.openxr_views = views;
+        data.openxr_views = views;
         let pose = self
             .viewer_space
-            .locate(&self.space, self.frame_state.predicted_display_time)
+            .locate(&data.space, data.frame_state.predicted_display_time)
             .unwrap();
         let transform = Some(transform(&pose.pose));
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
@@ -465,10 +667,19 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         let (right_input_frame, right_select) =
             self.right_hand
-                .frame(&self.session, &self.frame_state, &self.space);
+                .frame(&self.session, &data.frame_state, &data.space);
         let (left_input_frame, left_select) =
             self.left_hand
-                .frame(&self.session, &self.frame_state, &self.space);
+                .frame(&self.session, &data.frame_state, &data.space);
+
+        // views() needs to reacquire the lock.
+        drop(data);
+
+        let events = if self.clip_planes.recently_updated() {
+            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        } else {
+            vec![]
+        };
 
         let frame = Frame {
             transform,
@@ -500,184 +711,9 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
-        let device = &mut self.surfman.0;
-        let context = &mut self.surfman.1;
-        let size = device.surface_info(&surface).size;
-        let surface_texture = device.create_surface_texture(context, surface).unwrap();
-        let texture_id = surface_texture.gl_texture();
-
-        let mut value = [0];
-        unsafe {
-            self.gl.get_integer_v(gl::FRAMEBUFFER_BINDING, &mut value);
-        }
-        let old_framebuffer = value[0] as gl::GLuint;
-
-        // Bind the completed WebXR frame to the read framebuffer.
-        self.gl
-            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
-        self.gl.framebuffer_texture_2d(
-            gl::READ_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            device.surface_gl_texture_target(),
-            texture_id,
-            0,
-        );
-
-        // XXXManishearth this code should perhaps be in wait_for_animation_frame,
-        // but we then get errors that wait_image was called without a release_image()
-        self.frame_stream
-            .begin()
-            .expect("failed to start frame stream");
-
-        self.left_image = self.left_swapchain.acquire_image().unwrap();
-        self.left_swapchain
-            .wait_image(openxr::Duration::INFINITE)
-            .unwrap();
-        self.right_image = self.right_swapchain.acquire_image().unwrap();
-        self.right_swapchain
-            .wait_image(openxr::Duration::INFINITE)
-            .unwrap();
-
-        let left_image = self.left_images[self.left_image as usize];
-        let right_image = self.right_images[self.right_image as usize];
-
-        let left_surface = unsafe {
-            device
-                .create_surface_from_texture(
-                    &context,
-                    &Size2D::new(size.width / 2, size.height),
-                    left_image,
-                )
-                .expect("couldn't create left surface")
-        };
-        let left_surface_texture = device
-            .create_surface_texture(context, left_surface)
-            .expect("couldn't create left surface texture");
-        let left_texture_id = left_surface_texture.gl_texture();
-
-        let right_surface = unsafe {
-            device
-                .create_surface_from_texture(
-                    &context,
-                    &Size2D::new(size.width / 2, size.height),
-                    right_image,
-                )
-                .expect("couldn't create right surface")
-        };
-        let right_surface_texture = device
-            .create_surface_texture(context, right_surface)
-            .expect("couldn't create right surface texture");
-        let right_texture_id = right_surface_texture.gl_texture();
-
-        self.gl
-            .bind_framebuffer(gl::DRAW_FRAMEBUFFER, self.write_fbo);
-
-        // Bind the left eye's texture to the draw framebuffer.
-        self.gl.framebuffer_texture_2d(
-            gl::DRAW_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            device.surface_gl_texture_target(),
-            left_texture_id,
-            0,
-        );
-
-        // Blit the appropriate rectangle from the WebXR texture to the d3d texture,
-        // flipping the y axis in the process to account for OpenGL->D3D.
-        self.gl.blit_framebuffer(
-            0,
-            0,
-            size.width / 2,
-            size.height,
-            0,
-            size.height,
-            size.width / 2,
-            0,
-            gl::COLOR_BUFFER_BIT,
-            gl::NEAREST,
-        );
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        // Bind the right eye's texture to the draw framebuffer.
-        self.gl.framebuffer_texture_2d(
-            gl::DRAW_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            device.surface_gl_texture_target(),
-            right_texture_id,
-            0,
-        );
-
-        // Blit the appropriate rectangle from the WebXR texture to the d3d texture.
-        self.gl.blit_framebuffer(
-            size.width / 2,
-            0,
-            size.width,
-            size.height,
-            0,
-            size.height,
-            size.width / 2,
-            0,
-            gl::COLOR_BUFFER_BIT,
-            gl::NEAREST,
-        );
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        self.gl.flush();
-
-        // Restore old GL bindings.
-        self.gl.bind_framebuffer(gl::FRAMEBUFFER, old_framebuffer);
-
-        self.left_swapchain.release_image().unwrap();
-        self.right_swapchain.release_image().unwrap();
-        self.frame_stream
-            .end(
-                self.frame_state.predicted_display_time,
-                self.blend_mode,
-                &[&CompositionLayerProjection::new()
-                    .space(&self.space)
-                    .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
-                    .views(&[
-                        openxr::CompositionLayerProjectionView::new()
-                            .pose(self.openxr_views[0].pose)
-                            .fov(self.openxr_views[0].fov)
-                            .sub_image(
-                                // XXXManishearth is this correct?
-                                openxr::SwapchainSubImage::new()
-                                    .swapchain(&self.left_swapchain)
-                                    .image_array_index(0)
-                                    .image_rect(openxr::Rect2Di {
-                                        offset: openxr::Offset2Di { x: 0, y: 0 },
-                                        extent: self.left_extent,
-                                    }),
-                            ),
-                        openxr::CompositionLayerProjectionView::new()
-                            .pose(self.openxr_views[1].pose)
-                            .fov(self.openxr_views[1].fov)
-                            .sub_image(
-                                openxr::SwapchainSubImage::new()
-                                    .swapchain(&self.right_swapchain)
-                                    .image_array_index(0)
-                                    .image_rect(openxr::Rect2Di {
-                                        offset: openxr::Offset2Di { x: 0, y: 0 },
-                                        extent: self.right_extent,
-                                    }),
-                            ),
-                    ])],
-            )
-            .unwrap();
-
-        let surface = device
-            .destroy_surface_texture(context, surface_texture)
-            .unwrap();
-        let left_surface = device
-            .destroy_surface_texture(context, left_surface_texture)
-            .unwrap();
-        device.destroy_surface(context, left_surface).unwrap();
-
-        let right_surface = device
-            .destroy_surface_texture(context, right_surface_texture)
-            .unwrap();
-        device.destroy_surface(context, right_surface).unwrap();
-
+        // We have already told OpenXR to display the frame as part of `recycle_front_buffer`.
+        // Due to threading issues we can't call D3D11 APIs on the openxr thread as the
+        // WebGL thread might be using the device simultaneously, so this method is a no-op.
         surface
     }
 
@@ -734,11 +770,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 }
 
-impl Drop for OpenXrDevice {
-    fn drop(&mut self) {
-        let _ = self.surfman.0.destroy_context(&mut self.surfman.1);
-    }
-}
 fn transform<Src, Dst>(pose: &Posef) -> RigidTransform3D<f32, Src, Dst> {
     let rotation = Rotation3D::quaternion(
         pose.orientation.x,

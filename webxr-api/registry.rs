@@ -13,6 +13,7 @@ use crate::Receiver;
 use crate::Sender;
 use crate::Session;
 use crate::SessionBuilder;
+use crate::SessionId;
 use crate::SessionInit;
 use crate::SessionMode;
 use crate::SwapChainId;
@@ -39,6 +40,7 @@ pub struct MainThreadRegistry<SwapChains> {
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
+    next_session_id: u32,
 }
 
 pub trait MainThreadWaker: 'static + Send {
@@ -139,6 +141,7 @@ where
             sender,
             receiver,
             waker,
+            next_session_id: 0,
         })
     }
 
@@ -211,7 +214,10 @@ where
         let swap_chains = self.swap_chains.as_mut().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
             if discovery.supports_session(mode) {
-                let xr = SessionBuilder::new(swap_chains, &mut self.sessions, raf_sender.clone());
+                let id = SessionId(self.next_session_id);
+                self.next_session_id += 1;
+                let xr =
+                    SessionBuilder::new(swap_chains, &mut self.sessions, raf_sender.clone(), id);
                 match discovery.request_session(mode, &init, xr) {
                     Ok(session) => return Ok(session),
                     Err(err) => warn!("XR device error {:?}", err),
