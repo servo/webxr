@@ -50,6 +50,7 @@ fn main() {
         let mut builder = bindgen::Builder::default()
             .header("magicleap/magicleap_c_api.h")
             .blacklist_type("MLResult")
+            .size_t_is_usize(true)
             .derive_default(true)
             .rustfmt_bindings(true);
 
