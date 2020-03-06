@@ -132,7 +132,7 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
         let data = self.data.clone();
         let clip_planes = Default::default();
         let granted_features = init.validate(mode, &data.lock().unwrap().supported_features)?;
-        xr.run_on_main_thread(move || {
+        xr.spawn(move || {
             Ok(HeadlessDevice {
                 data,
                 mode,
