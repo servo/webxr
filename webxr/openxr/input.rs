@@ -74,8 +74,10 @@ pub struct OpenXRInput {
     action_grip_pose: Action<Posef>,
     action_grip_space: Space,
     action_click: Action<bool>,
+    action_squeeze: Action<bool>,
     hand: &'static str,
     click_state: ClickState,
+    squeeze_state: ClickState,
 }
 
 impl OpenXRInput {
@@ -117,6 +119,13 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
+        let action_squeeze: Action<bool> = action_set
+            .create_action(
+                &format!("{}_hand_squeeze", hand),
+                &format!("{} hand squeeze", hand),
+                &[],
+            )
+            .unwrap();
         Self {
             id,
             action_aim_pose,
@@ -124,12 +133,55 @@ impl OpenXRInput {
             action_grip_pose,
             action_grip_space,
             action_click,
+            action_squeeze,
             hand,
             click_state: ClickState::Done,
+            squeeze_state: ClickState::Done,
         }
     }
 
-    pub fn get_bindings(&self, instance: &Instance) -> Vec<Binding> {
+    pub fn setup_inputs(instance: &Instance, session: &Session<D3D11>) -> (ActionSet, Self, Self) {
+        let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
+        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
+        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
+
+        let mut bindings =
+            right_hand.get_bindings(instance, "trigger/value", Some("squeeze/click"));
+        bindings.extend(
+            left_hand
+                .get_bindings(instance, "trigger/value", Some("squeeze/click"))
+                .into_iter(),
+        );
+        let path_controller = instance
+            .string_to_path("/interaction_profiles/microsoft/motion_controller")
+            .unwrap();
+        instance
+            .suggest_interaction_profile_bindings(path_controller, &bindings)
+            .unwrap();
+
+        let mut bindings = right_hand.get_bindings(instance, "select/click", None);
+        bindings.extend(
+            left_hand
+                .get_bindings(instance, "select/click", None)
+                .into_iter(),
+        );
+        let path_controller = instance
+            .string_to_path("/interaction_profiles/khr/simple_controller")
+            .unwrap();
+        instance
+            .suggest_interaction_profile_bindings(path_controller, &bindings)
+            .unwrap();
+        session.attach_action_sets(&[&action_set]).unwrap();
+
+        (action_set, right_hand, left_hand)
+    }
+
+    fn get_bindings(
+        &self,
+        instance: &Instance,
+        select_name: &str,
+        squeeze_name: Option<&str>,
+    ) -> Vec<Binding> {
         let path_aim_pose = instance
             .string_to_path(&format!("/user/hand/{}/input/aim/pose", self.hand))
             .unwrap();
@@ -139,11 +191,19 @@ impl OpenXRInput {
             .unwrap();
         let binding_grip_pose = Binding::new(&self.action_grip_pose, path_grip_pose);
         let path_click = instance
-            .string_to_path(&format!("/user/hand/{}/input/select/click", self.hand))
+            .string_to_path(&format!("/user/hand/{}/input/{}", self.hand, select_name))
             .unwrap();
         let binding_click = Binding::new(&self.action_click, path_click);
 
-        vec![binding_aim_pose, binding_grip_pose, binding_click]
+        let mut ret = vec![binding_aim_pose, binding_grip_pose, binding_click];
+        if let Some(squeeze_name) = squeeze_name {
+            let path_squeeze = instance
+                .string_to_path(&format!("/user/hand/{}/input/{}", self.hand, squeeze_name))
+                .unwrap();
+            let binding_squeeze = Binding::new(&self.action_squeeze, path_squeeze);
+            ret.push(binding_squeeze);
+        }
+        ret
     }
 
     pub fn frame(
@@ -151,24 +211,28 @@ impl OpenXRInput {
         session: &Session<D3D11>,
         frame_state: &FrameState,
         base_space: &Space,
-    ) -> (InputFrame, Option<SelectEvent>) {
+    ) -> (InputFrame, Option<SelectEvent>, Option<SelectEvent>) {
         let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
         let grip_origin = pose_for(&self.action_grip_space, frame_state, base_space);
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
+        let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
 
-        let (is_active, select_event) = self.click_state.update(&self.action_click, session);
+        let (click_is_active, click_select_event) =
+            self.click_state.update(&self.action_click, session);
+        let (squeeze_is_active, squeeze_select_event) =
+            self.squeeze_state.update(&self.action_squeeze, session);
 
         let input_frame = InputFrame {
             target_ray_origin,
             id: self.id,
-            pressed: is_active && click.current_state,
-            squeezed: false,
+            pressed: click_is_active && click.current_state,
+            squeezed: squeeze_is_active && squeeze.current_state,
             grip_origin,
         };
 
-        (input_frame, select_event)
+        (input_frame, click_select_event, squeeze_select_event)
     }
 }
 
