@@ -521,18 +521,7 @@ impl OpenXrDevice {
 
         // input
 
-        let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
-        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
-        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
-        let mut bindings = right_hand.get_bindings(&instance);
-        bindings.extend(left_hand.get_bindings(&instance).into_iter());
-        let path_controller = instance
-            .string_to_path("/interaction_profiles/khr/simple_controller")
-            .unwrap();
-        instance
-            .suggest_interaction_profile_bindings(path_controller, &bindings)
-            .unwrap();
-        session.attach_action_sets(&[&action_set]).unwrap();
+        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session);
 
         Ok(OpenXrDevice {
             instance,
@@ -696,10 +685,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let (right_input_frame, right_select) =
+        let (right_input_frame, right_select, right_squeeze) =
             self.right_hand
                 .frame(&self.session, &data.frame_state, &data.space);
-        let (left_input_frame, left_select) =
+        let (left_input_frame, left_select, left_squeeze) =
             self.left_hand
                 .frame(&self.session, &data.frame_state, &data.space);
 
@@ -728,6 +717,14 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
+        if let Some(right_squeeze) = right_squeeze {
+            self.events.callback(Event::Select(
+                InputId(0),
+                SelectKind::Squeeze,
+                right_squeeze,
+                frame.clone(),
+            ));
+        }
         if let Some(left_select) = left_select {
             self.events.callback(Event::Select(
                 InputId(1),
@@ -736,7 +733,14 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-
+        if let Some(left_squeeze) = left_squeeze {
+            self.events.callback(Event::Select(
+                InputId(1),
+                SelectKind::Squeeze,
+                left_squeeze,
+                frame.clone(),
+            ));
+        }
         // todo use pose in input
         Some(frame)
     }
