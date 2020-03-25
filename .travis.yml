@@ -1,7 +1,7 @@
 language: rust
 
 rust:
-  - nightly
+  #- nightly
   - stable
 
 before_script:
