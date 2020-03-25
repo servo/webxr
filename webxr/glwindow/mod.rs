@@ -95,7 +95,7 @@ impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        mode == SessionMode::ImmersiveVR
+        mode == SessionMode::ImmersiveVR || mode == SessionMode::ImmersiveAR
     }
 }
 
