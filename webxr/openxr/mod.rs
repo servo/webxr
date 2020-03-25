@@ -19,6 +19,7 @@ use openxr::{
     Vector3f, ViewConfigurationType,
 };
 use std::sync::{Arc, Mutex};
+use std::{thread, time::Duration};
 use surfman::platform::generic::universal::device::Device as SurfmanDevice;
 use surfman::platform::generic::universal::surface::Surface;
 use surfman_chains::SurfaceProvider;
@@ -46,6 +47,7 @@ use webxr_api::SessionMode;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Views;
+use webxr_api::Visibility;
 use winapi::shared::dxgiformat;
 
 mod input;
@@ -552,6 +554,7 @@ impl OpenXrDevice {
 
     fn handle_openxr_events(&mut self) -> bool {
         use openxr::Event::*;
+        let mut stopped = false;
         loop {
             let mut buffer = openxr::EventDataBuffer::new();
             let event = self.instance.poll_event(&mut buffer).unwrap();
@@ -559,6 +562,30 @@ impl OpenXrDevice {
                 Some(SessionStateChanged(session_change)) => match session_change.state() {
                     openxr::SessionState::EXITING | openxr::SessionState::LOSS_PENDING => {
                         break;
+                    }
+                    openxr::SessionState::STOPPING => {
+                        self.events
+                            .callback(Event::VisibilityChange(Visibility::Hidden));
+                        self.session
+                            .end()
+                            .expect("Session failed to end on STOPPING");
+                        stopped = true;
+                    }
+                    openxr::SessionState::READY if stopped => {
+                        self.events
+                            .callback(Event::VisibilityChange(Visibility::Visible));
+                        self.session
+                            .begin(ViewConfigurationType::PRIMARY_STEREO)
+                            .expect("Session failed to begin on READY");
+                        stopped = false;
+                    }
+                    openxr::SessionState::FOCUSED => {
+                        self.events
+                            .callback(Event::VisibilityChange(Visibility::Visible));
+                    }
+                    openxr::SessionState::VISIBLE => {
+                        self.events
+                            .callback(Event::VisibilityChange(Visibility::VisibleBlurred));
                     }
                     _ => {
                         // FIXME: Handle other states
@@ -569,6 +596,10 @@ impl OpenXrDevice {
                 }
                 Some(_) => {
                     // FIXME: Handle other events
+                }
+                None if stopped => {
+                    // XXXManishearth be able to handle exits during this time
+                    thread::sleep(Duration::from_millis(200));
                 }
                 None => {
                     // No more events to process
