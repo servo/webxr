@@ -15,8 +15,8 @@ use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
     Fovf, FrameState, FrameStream, FrameWaiter, Instance, Posef, Quaternionf, ReferenceSpaceType,
-    Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
-    Vector3f, ViewConfigurationType,
+    Session, Space, SpaceLocationFlags, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
+    SwapchainUsageFlags, Time, Vector3f, ViewConfigurationType,
 };
 use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
@@ -52,8 +52,6 @@ use winapi::shared::dxgiformat;
 
 mod input;
 use input::OpenXRInput;
-
-const HEIGHT: f32 = 1.4;
 
 pub trait GlThread: Send {
     fn execute(&self, runnable: Box<dyn FnOnce() + Send>);
@@ -158,6 +156,8 @@ struct OpenXrDevice {
     frame_waiter: FrameWaiter,
     shared_data: Arc<Mutex<SharedData>>,
     viewer_space: Space,
+    floor_space: Space,
+    floor_dirty: bool,
     blend_mode: EnvironmentBlendMode,
     clip_planes: ClipPlanes,
     view_configurations: Vec<openxr::ViewConfigurationView>,
@@ -437,6 +437,10 @@ impl OpenXrDevice {
             .create_reference_space(ReferenceSpaceType::VIEW, pose)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
+        let floor_space = session
+            .create_reference_space(ReferenceSpaceType::STAGE, pose)
+            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+
         let view_configuration_type = ViewConfigurationType::PRIMARY_STEREO;
         let view_configurations = instance
             .enumerate_view_configuration_views(system, view_configuration_type)
@@ -529,6 +533,8 @@ impl OpenXrDevice {
             session,
             frame_waiter,
             viewer_space,
+            floor_space,
+            floor_dirty: true,
             clip_planes: Default::default(),
             blend_mode,
             view_configurations,
@@ -583,6 +589,12 @@ impl OpenXrDevice {
                 Some(InstanceLossPending(_)) => {
                     break;
                 }
+                Some(ReferenceSpaceChangePending(r)) => {
+                    if r.reference_space_type() == ReferenceSpaceType::STAGE {
+                        self.floor_dirty = true;
+                    }
+                    // FIXME: Trigger reset events for all other cases
+                }
                 Some(_) => {
                     // FIXME: Handle other events
                 }
@@ -598,12 +610,29 @@ impl OpenXrDevice {
         }
         true
     }
+
+    fn floor_transform_inner(
+        &self,
+        space: &Space,
+        time: Time,
+    ) -> Option<RigidTransform3D<f32, Native, Floor>> {
+        let pose = space.locate(&self.floor_space, time).unwrap();
+
+        let pose_valid = pose
+            .location_flags
+            .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
+
+        if pose_valid {
+            Some(transform(&pose.pose))
+        } else {
+            None
+        }
+    }
 }
 
 impl DeviceAPI<Surface> for OpenXrDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
-        let translation = Vector3D::new(0.0, HEIGHT, 0.0);
-        Some(RigidTransform3D::from_translation(translation))
+        None
     }
 
     fn views(&self) -> Views {
@@ -692,14 +721,20 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             self.left_hand
                 .frame(&self.session, &data.frame_state, &data.space);
 
-        // views() needs to reacquire the lock.
-        drop(data);
-
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
+        let mut events = if self.floor_dirty {
+            vec![FrameUpdateEvent::UpdateFloorTransform(
+                self.floor_transform_inner(&data.space, data.frame_state.predicted_display_time),
+            )]
         } else {
             vec![]
         };
+
+        // views() needs to reacquire the lock.
+        drop(data);
+
+        if self.clip_planes.recently_updated() {
+            events.push(FrameUpdateEvent::UpdateViews(self.views()));
+        }
 
         let frame = Frame {
             transform,
