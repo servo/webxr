@@ -1,14 +1,20 @@
 language: rust
 
+os:
+  - linux
+  - osx
+  - windows
+
 rust:
-  #- nightly
+  - nightly
   - stable
 
 before_script:
-  - rustup component add rustfmt
+  - if [ $TRAVIS_RUST_VERSION =="stable" ]; then rustup component add rustfmt; fi
+  - if [ $TRAVIS_RUST_VERSION == "nightly" ]; then rustup component add rust-src --target=aarch64-uwp-windows-msvc; fi
 
 script:
-  - cargo fmt --all -- --check
+  - if [ $TRAVIS_RUST_VERSION =="stable" ]; then cargo fmt --all -- --check; fi
   - cd webxr
   - cargo build --features=glwindow,headless,googlevr
   - cargo build --features=ipc,glwindow,headless,googlevr
@@ -17,6 +23,7 @@ script:
   - cargo build --target arm-linux-androideabi --features=ipc,googlevr
   - rustup target add aarch64-pc-windows-msvc
   - cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
+  - if [ $TRAVIS_RUST_VERSION == "nightly" ]; then cargo build -Z build-std --target=aarch64-uwp-windows-msvc --features ipc,openxr-api; fi
 
 notifications:
   webhooks: http://build.servo.org:54856/travis
