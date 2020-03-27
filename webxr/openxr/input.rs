@@ -75,23 +75,28 @@ pub struct OpenXRInput {
     action_grip_space: Space,
     action_click: Action<bool>,
     action_squeeze: Action<bool>,
-    hand: &'static str,
+    handedness: Handedness,
     click_state: ClickState,
     squeeze_state: ClickState,
+    menu_gesture_sustain: u8,
+}
+
+fn hand_str(h: Handedness) -> &'static str {
+    match h {
+        Handedness::Right => "right",
+        Handedness::Left => "left",
+        _ => panic!("We don't support unknown handedness in openxr"),
+    }
 }
 
 impl OpenXRInput {
     pub fn new(
         id: InputId,
-        hand: Handedness,
+        handedness: Handedness,
         action_set: &ActionSet,
         session: &Session<D3D11>,
     ) -> Self {
-        let hand = match hand {
-            Handedness::Right => "right",
-            Handedness::Left => "left",
-            _ => panic!("We don't support unknown handedness in openxr"),
-        };
+        let hand = hand_str(handedness);
         let action_aim_pose: Action<Posef> = action_set
             .create_action(
                 &format!("{}_hand_aim", hand),
@@ -134,9 +139,10 @@ impl OpenXRInput {
             action_grip_space,
             action_click,
             action_squeeze,
-            hand,
+            handedness,
             click_state: ClickState::Done,
             squeeze_state: ClickState::Done,
+            menu_gesture_sustain: 0,
         }
     }
 
@@ -182,23 +188,24 @@ impl OpenXRInput {
         select_name: &str,
         squeeze_name: Option<&str>,
     ) -> Vec<Binding> {
+        let hand = hand_str(self.handedness);
         let path_aim_pose = instance
-            .string_to_path(&format!("/user/hand/{}/input/aim/pose", self.hand))
+            .string_to_path(&format!("/user/hand/{}/input/aim/pose", hand))
             .unwrap();
         let binding_aim_pose = Binding::new(&self.action_aim_pose, path_aim_pose);
         let path_grip_pose = instance
-            .string_to_path(&format!("/user/hand/{}/input/grip/pose", self.hand))
+            .string_to_path(&format!("/user/hand/{}/input/grip/pose", hand))
             .unwrap();
         let binding_grip_pose = Binding::new(&self.action_grip_pose, path_grip_pose);
         let path_click = instance
-            .string_to_path(&format!("/user/hand/{}/input/{}", self.hand, select_name))
+            .string_to_path(&format!("/user/hand/{}/input/{}", hand, select_name))
             .unwrap();
         let binding_click = Binding::new(&self.action_click, path_click);
 
         let mut ret = vec![binding_aim_pose, binding_grip_pose, binding_click];
         if let Some(squeeze_name) = squeeze_name {
             let path_squeeze = instance
-                .string_to_path(&format!("/user/hand/{}/input/{}", self.hand, squeeze_name))
+                .string_to_path(&format!("/user/hand/{}/input/{}", hand, squeeze_name))
                 .unwrap();
             let binding_squeeze = Binding::new(&self.action_squeeze, path_squeeze);
             ret.push(binding_squeeze);
@@ -211,10 +218,52 @@ impl OpenXRInput {
         session: &Session<D3D11>,
         frame_state: &FrameState,
         base_space: &Space,
-    ) -> (InputFrame, Option<SelectEvent>, Option<SelectEvent>) {
+    ) -> (
+        InputFrame,
+        /* clicked */ Option<SelectEvent>,
+        /* squeezed */ Option<SelectEvent>,
+        /* menu_selected */ bool,
+    ) {
+        use euclid::Vector3D;
         let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
         let grip_origin = pose_for(&self.action_grip_space, frame_state, base_space);
+
+        let mut menu_selected = false;
+        // Check if the palm is facing up. This is our "menu" gesture.
+        if let Some(grip_origin) = grip_origin {
+            // The X axis of the grip is perpendicular to the palm, however its
+            // direction is the opposite for each hand
+            //
+            // We obtain a unit vector poking out of the palm
+            let x_dir = if let Handedness::Left = self.handedness {
+                1.0
+            } else {
+                -1.0
+            };
+
+            // Rotate it by the grip to obtain the desired vector
+            let grip_x = grip_origin
+                .rotation
+                .transform_vector3d(Vector3D::new(x_dir, 0.0, 0.0));
+
+            // Dot product it with the "up" vector to see if it's pointing up
+            let angle = grip_x.dot(Vector3D::new(0.0, 1.0, 0.0));
+
+            // If the angle is close enough to 0, its cosine will be
+            // close to 1
+            if angle > 0.9 {
+                self.menu_gesture_sustain += 1;
+                if self.menu_gesture_sustain > 60 {
+                    menu_selected = true;
+                    self.menu_gesture_sustain = 0;
+                }
+            } else {
+                self.menu_gesture_sustain = 0;
+            }
+        } else {
+            self.menu_gesture_sustain = 0;
+        }
 
         let click = self.action_click.state(session, Path::NULL).unwrap();
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
@@ -232,7 +281,12 @@ impl OpenXRInput {
             grip_origin,
         };
 
-        (input_frame, click_select_event, squeeze_select_event)
+        (
+            input_frame,
+            click_select_event,
+            squeeze_select_event,
+            menu_selected,
+        )
     }
 }
 
