@@ -20,6 +20,14 @@ enum ClickState {
     Done,
 }
 
+/// All the information on a single input frame
+pub struct Frame {
+    pub frame: InputFrame,
+    pub select: Option<SelectEvent>,
+    pub squeeze: Option<SelectEvent>,
+    pub menu_selected: bool,
+}
+
 impl ClickState {
     fn update(
         &mut self,
@@ -218,12 +226,7 @@ impl OpenXRInput {
         session: &Session<D3D11>,
         frame_state: &FrameState,
         base_space: &Space,
-    ) -> (
-        InputFrame,
-        /* clicked */ Option<SelectEvent>,
-        /* squeezed */ Option<SelectEvent>,
-        /* menu_selected */ bool,
-    ) {
+    ) -> Frame {
         use euclid::Vector3D;
         let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
@@ -268,9 +271,8 @@ impl OpenXRInput {
         let click = self.action_click.state(session, Path::NULL).unwrap();
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
 
-        let (click_is_active, click_select_event) =
-            self.click_state.update(&self.action_click, session);
-        let (squeeze_is_active, squeeze_select_event) =
+        let (click_is_active, click_event) = self.click_state.update(&self.action_click, session);
+        let (squeeze_is_active, squeeze_event) =
             self.squeeze_state.update(&self.action_squeeze, session);
 
         let input_frame = InputFrame {
@@ -281,12 +283,12 @@ impl OpenXRInput {
             grip_origin,
         };
 
-        (
-            input_frame,
-            click_select_event,
-            squeeze_select_event,
+        Frame {
+            frame: input_frame,
+            select: click_event,
+            squeeze: squeeze_event,
             menu_selected,
-        )
+        }
     }
 }
 

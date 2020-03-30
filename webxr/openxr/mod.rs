@@ -744,12 +744,12 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let (mut right_input_frame, mut right_select, mut right_squeeze, right_menu) =
-            self.right_hand
-                .frame(&self.session, &data.frame_state, &data.space);
-        let (mut left_input_frame, mut left_select, mut left_squeeze, left_menu) =
-            self.left_hand
-                .frame(&self.session, &data.frame_state, &data.space);
+        let mut right = self
+            .right_hand
+            .frame(&self.session, &data.frame_state, &data.space);
+        let mut left = self
+            .left_hand
+            .frame(&self.session, &data.frame_state, &data.space);
 
         // views() needs to reacquire the lock.
         drop(data);
@@ -760,31 +760,31 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             vec![]
         };
 
-        if (left_menu || right_menu) && self.context_menu_future.is_none() {
+        if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
         }
 
         // Do not surface input info whilst the context menu is open
         if self.context_menu_future.is_some() {
-            right_input_frame.target_ray_origin = None;
-            right_input_frame.grip_origin = None;
-            left_input_frame.target_ray_origin = None;
-            left_input_frame.grip_origin = None;
-            right_select = None;
-            right_squeeze = None;
-            left_select = None;
-            left_squeeze = None;
+            right.frame.target_ray_origin = None;
+            right.frame.grip_origin = None;
+            left.frame.target_ray_origin = None;
+            left.frame.grip_origin = None;
+            right.select = None;
+            right.squeeze = None;
+            left.select = None;
+            left.squeeze = None;
         }
 
         let frame = Frame {
             transform,
-            inputs: vec![right_input_frame, left_input_frame],
+            inputs: vec![right.frame, left.frame],
             events,
             time_ns,
             sent_time: 0,
         };
 
-        if let Some(right_select) = right_select {
+        if let Some(right_select) = right.select {
             self.events.callback(Event::Select(
                 InputId(0),
                 SelectKind::Select,
@@ -792,7 +792,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(right_squeeze) = right_squeeze {
+        if let Some(right_squeeze) = right.squeeze {
             self.events.callback(Event::Select(
                 InputId(0),
                 SelectKind::Squeeze,
@@ -800,7 +800,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(left_select) = left_select {
+        if let Some(left_select) = left.select {
             self.events.callback(Event::Select(
                 InputId(1),
                 SelectKind::Select,
@@ -808,7 +808,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(left_squeeze) = left_squeeze {
+        if let Some(left_squeeze) = left.squeeze {
             self.events.callback(Event::Select(
                 InputId(1),
                 SelectKind::Squeeze,
@@ -816,7 +816,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        // todo use pose in input
         Some(frame)
     }
 
