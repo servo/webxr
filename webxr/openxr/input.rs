@@ -11,6 +11,10 @@ use webxr_api::InputId;
 use webxr_api::Native;
 use webxr_api::SelectEvent;
 
+/// Number of frames to wait with the menu gesture before
+/// opening the menu.
+const MENU_GESTURE_SUSTAIN_THRESHOLD: u8 = 60;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ClickState {
     Clicking,
@@ -257,7 +261,7 @@ impl OpenXRInput {
             // close to 1
             if angle > 0.9 {
                 self.menu_gesture_sustain += 1;
-                if self.menu_gesture_sustain > 60 {
+                if self.menu_gesture_sustain > MENU_GESTURE_SUSTAIN_THRESHOLD {
                     menu_selected = true;
                     self.menu_gesture_sustain = 0;
                 }
