@@ -65,19 +65,58 @@ pub trait SurfaceProviderRegistration: Send {
     fn clone(&self) -> Box<dyn SurfaceProviderRegistration>;
 }
 
+/// Provides a way to spawn and interact with context menus
+pub trait ContextMenuProvider: Send {
+    /// Open a context menu, return a way to poll for the result
+    fn open_context_menu(&self) -> Box<dyn ContextMenuFuture>;
+    /// Clone self as a trait object
+    fn clone_object(&self) -> Box<dyn ContextMenuProvider>;
+}
+
+/// A way to poll for the result of the context menu request
+pub trait ContextMenuFuture {
+    fn poll(&self) -> ContextMenuResult;
+}
+
+/// The result of polling on a context menu request
+pub enum ContextMenuResult {
+    /// Session should exit
+    ExitSession,
+    /// Dialog was dismissed
+    Dismissed,
+    /// User has not acted on dialog
+    Pending,
+}
+
+impl Drop for OpenXrDevice {
+    fn drop(&mut self) {
+        // This should be happening automatically in the destructors,
+        // but it isn't, presumably because there's an extra handle floating
+        // around somewhere
+        // XXXManishearth find out where that extra handle is
+        unsafe {
+            (self.instance.fp().destroy_session)(self.session.as_raw());
+            (self.instance.fp().destroy_instance)(self.instance.as_raw());
+        }
+    }
+}
+
 pub struct OpenXrDiscovery {
     gl_thread: Box<dyn GlThread>,
     provider_registration: Box<dyn SurfaceProviderRegistration>,
+    context_menu_provider: Box<dyn ContextMenuProvider>,
 }
 
 impl OpenXrDiscovery {
     pub fn new(
         gl_thread: Box<dyn GlThread>,
         provider_registration: Box<dyn SurfaceProviderRegistration>,
+        context_menu_provider: Box<dyn ContextMenuProvider>,
     ) -> Self {
         Self {
             gl_thread,
             provider_registration,
+            context_menu_provider,
         }
     }
 }
@@ -132,6 +171,7 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
             let provider_registration = self.provider_registration.clone();
             let granted_features = init.validate(mode, &["local-floor".into()])?;
             let id = xr.id();
+            let context_menu_provider = self.context_menu_provider.clone_object();
             xr.spawn(move || {
                 OpenXrDevice::new(
                     gl_thread,
@@ -139,6 +179,7 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
                     instance,
                     granted_features,
                     id,
+                    context_menu_provider,
                 )
             })
         } else {
@@ -152,9 +193,9 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
 }
 
 struct OpenXrDevice {
+    session: Session<D3D11>,
     instance: Instance,
     events: EventBuffer,
-    session: Session<D3D11>,
     frame_waiter: FrameWaiter,
     shared_data: Arc<Mutex<SharedData>>,
     viewer_space: Space,
@@ -167,6 +208,8 @@ struct OpenXrDevice {
     right_hand: OpenXRInput,
     left_hand: OpenXRInput,
     granted_features: Vec<String>,
+    context_menu_provider: Box<dyn ContextMenuProvider>,
+    context_menu_future: Option<Box<dyn ContextMenuFuture>>,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -368,6 +411,7 @@ impl OpenXrDevice {
         instance: Instance,
         granted_features: Vec<String>,
         id: SessionId,
+        context_menu_provider: Box<dyn ContextMenuProvider>,
     ) -> Result<OpenXrDevice, Error> {
         let (device_tx, device_rx) = crossbeam_channel::unbounded();
         let (provider_tx, provider_rx) = crossbeam_channel::unbounded();
@@ -538,6 +582,8 @@ impl OpenXrDevice {
             right_hand,
             left_hand,
             granted_features,
+            context_menu_provider,
+            context_menu_future: None,
         })
     }
 
@@ -550,7 +596,8 @@ impl OpenXrDevice {
             match event {
                 Some(SessionStateChanged(session_change)) => match session_change.state() {
                     openxr::SessionState::EXITING | openxr::SessionState::LOSS_PENDING => {
-                        break;
+                        self.events.callback(Event::SessionEnd);
+                        return false;
                     }
                     openxr::SessionState::STOPPING => {
                         self.events
@@ -581,7 +628,8 @@ impl OpenXrDevice {
                     }
                 },
                 Some(InstanceLossPending(_)) => {
-                    break;
+                    self.events.callback(Event::SessionEnd);
+                    return false;
                 }
                 Some(_) => {
                     // FIXME: Handle other events
@@ -657,6 +705,17 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             // Session is not running anymore.
             return None;
         }
+        if let Some(ref context_menu_future) = self.context_menu_future {
+            match context_menu_future.poll() {
+                ContextMenuResult::ExitSession => {
+                    self.quit();
+                    return None;
+                }
+                ContextMenuResult::Dismissed => self.context_menu_future = None,
+                ContextMenuResult::Pending => (),
+            }
+        }
+
         let mut data = self.shared_data.lock().unwrap();
         data.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
         let time_ns = time::precise_time_ns();
@@ -685,12 +744,12 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let (right_input_frame, right_select, right_squeeze) =
-            self.right_hand
-                .frame(&self.session, &data.frame_state, &data.space);
-        let (left_input_frame, left_select, left_squeeze) =
-            self.left_hand
-                .frame(&self.session, &data.frame_state, &data.space);
+        let mut right = self
+            .right_hand
+            .frame(&self.session, &data.frame_state, &data.space);
+        let mut left = self
+            .left_hand
+            .frame(&self.session, &data.frame_state, &data.space);
 
         // views() needs to reacquire the lock.
         drop(data);
@@ -701,15 +760,31 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             vec![]
         };
 
+        if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
+            self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
+        }
+
+        // Do not surface input info whilst the context menu is open
+        if self.context_menu_future.is_some() {
+            right.frame.target_ray_origin = None;
+            right.frame.grip_origin = None;
+            left.frame.target_ray_origin = None;
+            left.frame.grip_origin = None;
+            right.select = None;
+            right.squeeze = None;
+            left.select = None;
+            left.squeeze = None;
+        }
+
         let frame = Frame {
             transform,
-            inputs: vec![right_input_frame, left_input_frame],
+            inputs: vec![right.frame, left.frame],
             events,
             time_ns,
             sent_time: 0,
         };
 
-        if let Some(right_select) = right_select {
+        if let Some(right_select) = right.select {
             self.events.callback(Event::Select(
                 InputId(0),
                 SelectKind::Select,
@@ -717,7 +792,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(right_squeeze) = right_squeeze {
+        if let Some(right_squeeze) = right.squeeze {
             self.events.callback(Event::Select(
                 InputId(0),
                 SelectKind::Squeeze,
@@ -725,7 +800,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(left_select) = left_select {
+        if let Some(left_select) = left.select {
             self.events.callback(Event::Select(
                 InputId(1),
                 SelectKind::Select,
@@ -733,7 +808,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        if let Some(left_squeeze) = left_squeeze {
+        if let Some(left_squeeze) = left.squeeze {
             self.events.callback(Event::Select(
                 InputId(1),
                 SelectKind::Squeeze,
@@ -741,7 +816,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 frame.clone(),
             ));
         }
-        // todo use pose in input
         Some(frame)
     }
 
@@ -779,12 +853,33 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
     fn quit(&mut self) {
         self.session.request_exit().unwrap();
+        loop {
+            let mut buffer = openxr::EventDataBuffer::new();
+            let event = self.instance.poll_event(&mut buffer).unwrap();
+            match event {
+                Some(openxr::Event::SessionStateChanged(session_change)) => {
+                    match session_change.state() {
+                        openxr::SessionState::EXITING => {
+                            self.events.callback(Event::SessionEnd);
+                            break;
+                        }
+                        openxr::SessionState::STOPPING => {
+                            self.session
+                                .end()
+                                .expect("Session failed to end on STOPPING");
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
     }
 
     fn set_quitter(&mut self, _: Quitter) {
-        // Glwindow currently doesn't have any way to end its own session
-        // XXXManishearth add something for this that listens for the window
-        // being closed
+        // the quitter is only needed if we have anything from outside the render
+        // thread that can signal a quit. We don't.
     }
 
     fn update_clip_planes(&mut self, near: f32, far: f32) {
