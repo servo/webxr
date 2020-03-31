@@ -738,18 +738,18 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .viewer_space
             .locate(&data.space, data.frame_state.predicted_display_time)
             .unwrap();
-        let transform = Some(transform(&pose.pose));
+        let transform = transform(&pose.pose);
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let mut right = self
-            .right_hand
-            .frame(&self.session, &data.frame_state, &data.space);
-        let mut left = self
-            .left_hand
-            .frame(&self.session, &data.frame_state, &data.space);
+        let mut right =
+            self.right_hand
+                .frame(&self.session, &data.frame_state, &data.space, &transform);
+        let mut left =
+            self.left_hand
+                .frame(&self.session, &data.frame_state, &data.space, &transform);
 
         // views() needs to reacquire the lock.
         drop(data);
@@ -762,10 +762,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
-        }
-
-        // Do not surface input info whilst the context menu is open
-        if self.context_menu_future.is_some() {
+        } else if self.context_menu_future.is_some() {
+            // Do not surface input info whilst the context menu is open
+            // We don't do this for the first frame after the context menu is opened
+            // so that the appropriate select cancel events may fire
             right.frame.target_ray_origin = None;
             right.frame.grip_origin = None;
             left.frame.target_ray_origin = None;
@@ -777,7 +777,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let frame = Frame {
-            transform,
+            transform: Some(transform),
             inputs: vec![right.frame, left.frame],
             events,
             time_ns,

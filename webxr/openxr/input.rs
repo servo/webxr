@@ -10,6 +10,7 @@ use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::Native;
 use webxr_api::SelectEvent;
+use webxr_api::Viewer;
 
 /// Number of frames to wait with the menu gesture before
 /// opening the menu.
@@ -18,9 +19,6 @@ const MENU_GESTURE_SUSTAIN_THRESHOLD: u8 = 60;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ClickState {
     Clicking,
-    /// it's clicking, but it lost tracking during the click,
-    /// so we'll only fire a selectend event
-    ClickingLost,
     Done,
 }
 
@@ -37,11 +35,17 @@ impl ClickState {
         &mut self,
         action: &Action<bool>,
         session: &Session<D3D11>,
+        menu_selected: bool,
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
 
         let select_event = if click.is_active {
             match (click.current_state, *self) {
+                (_, ClickState::Clicking) if menu_selected => {
+                    *self = ClickState::Done;
+                    // cancel the select, we're showing a menu
+                    Some(SelectEvent::End)
+                }
                 (true, ClickState::Done) => {
                     *self = ClickState::Clicking;
                     Some(SelectEvent::Start)
@@ -50,15 +54,12 @@ impl ClickState {
                     *self = ClickState::Done;
                     Some(SelectEvent::Select)
                 }
-                (false, ClickState::ClickingLost) => {
-                    *self = ClickState::Done;
-                    Some(SelectEvent::End)
-                }
                 _ => None,
             }
         } else if *self == ClickState::Clicking {
-            *self = ClickState::ClickingLost;
-            None
+            *self = ClickState::Done;
+            // cancel the select, we lost tracking
+            Some(SelectEvent::End)
         } else {
             None
         };
@@ -230,6 +231,7 @@ impl OpenXRInput {
         session: &Session<D3D11>,
         frame_state: &FrameState,
         base_space: &Space,
+        viewer: &RigidTransform3D<f32, Viewer, Native>,
     ) -> Frame {
         use euclid::Vector3D;
         let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
@@ -242,28 +244,34 @@ impl OpenXRInput {
             // The X axis of the grip is perpendicular to the palm, however its
             // direction is the opposite for each hand
             //
-            // We obtain a unit vector poking out of the palm
+            // We obtain a unit vector pointing out of the palm
             let x_dir = if let Handedness::Left = self.handedness {
                 1.0
             } else {
                 -1.0
             };
-
             // Rotate it by the grip to obtain the desired vector
             let grip_x = grip_origin
                 .rotation
                 .transform_vector3d(Vector3D::new(x_dir, 0.0, 0.0));
-
-            // Dot product it with the "up" vector to see if it's pointing up
-            let angle = grip_x.dot(Vector3D::new(0.0, 1.0, 0.0));
+            let gaze = viewer
+                .rotation
+                .transform_vector3d(Vector3D::new(0., 0., 1.));
 
             // If the angle is close enough to 0, its cosine will be
             // close to 1
-            if angle > 0.9 {
-                self.menu_gesture_sustain += 1;
-                if self.menu_gesture_sustain > MENU_GESTURE_SUSTAIN_THRESHOLD {
-                    menu_selected = true;
-                    self.menu_gesture_sustain = 0;
+            // check if the user's gaze is parallel to the palm
+            if gaze.dot(grip_x) > 0.95 {
+                let input_relative = (viewer.translation - grip_origin.translation).normalize();
+                // if so, check if the user is actually looking at the palm
+                if gaze.dot(input_relative) > 0.95 {
+                    self.menu_gesture_sustain += 1;
+                    if self.menu_gesture_sustain > MENU_GESTURE_SUSTAIN_THRESHOLD {
+                        menu_selected = true;
+                        self.menu_gesture_sustain = 0;
+                    }
+                } else {
+                    self.menu_gesture_sustain = 0
                 }
             } else {
                 self.menu_gesture_sustain = 0;
@@ -275,9 +283,12 @@ impl OpenXRInput {
         let click = self.action_click.state(session, Path::NULL).unwrap();
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
 
-        let (click_is_active, click_event) = self.click_state.update(&self.action_click, session);
+        let (click_is_active, click_event) =
+            self.click_state
+                .update(&self.action_click, session, menu_selected);
         let (squeeze_is_active, squeeze_event) =
-            self.squeeze_state.update(&self.action_squeeze, session);
+            self.squeeze_state
+                .update(&self.action_squeeze, session, menu_selected);
 
         let input_frame = InputFrame {
             target_ray_origin,
