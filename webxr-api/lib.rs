@@ -14,10 +14,12 @@ mod device;
 mod error;
 mod events;
 mod frame;
+mod hittest;
 mod input;
 mod mock;
 mod registry;
 mod session;
+mod space;
 pub mod util;
 mod view;
 
@@ -32,6 +34,12 @@ pub use events::Visibility;
 
 pub use frame::Frame;
 pub use frame::FrameUpdateEvent;
+
+pub use hittest::EntityType;
+pub use hittest::EntityTypes;
+pub use hittest::HitTestId;
+pub use hittest::HitTestSource;
+pub use hittest::Ray;
 
 pub use input::Handedness;
 pub use input::InputFrame;
@@ -62,6 +70,10 @@ pub use session::SessionId;
 pub use session::SessionInit;
 pub use session::SessionMode;
 pub use session::SessionThread;
+
+pub use space::ApiSpace;
+pub use space::BaseSpace;
+pub use space::Space;
 
 pub use view::Display;
 pub use view::Floor;
