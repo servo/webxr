@@ -762,10 +762,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
-        }
-
-        // Do not surface input info whilst the context menu is open
-        if self.context_menu_future.is_some() {
+        } else if self.context_menu_future.is_some() {
+            // Do not surface input info whilst the context menu is open
+            // We don't do this for the first frame after the context menu is opened
+            // so that the appropriate select cancel events may fire
             right.frame.target_ray_origin = None;
             right.frame.grip_origin = None;
             left.frame.target_ray_origin = None;

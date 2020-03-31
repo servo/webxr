@@ -19,9 +19,6 @@ const MENU_GESTURE_SUSTAIN_THRESHOLD: u8 = 60;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ClickState {
     Clicking,
-    /// it's clicking, but it lost tracking during the click,
-    /// so we'll only fire a selectend event
-    ClickingLost,
     Done,
 }
 
@@ -38,11 +35,17 @@ impl ClickState {
         &mut self,
         action: &Action<bool>,
         session: &Session<D3D11>,
+        menu_selected: bool,
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
 
         let select_event = if click.is_active {
             match (click.current_state, *self) {
+                (_, ClickState::Clicking) if menu_selected => {
+                    *self = ClickState::Done;
+                    // cancel the select, we're showing a menu
+                    Some(SelectEvent::End)
+                }
                 (true, ClickState::Done) => {
                     *self = ClickState::Clicking;
                     Some(SelectEvent::Start)
@@ -51,15 +54,12 @@ impl ClickState {
                     *self = ClickState::Done;
                     Some(SelectEvent::Select)
                 }
-                (false, ClickState::ClickingLost) => {
-                    *self = ClickState::Done;
-                    Some(SelectEvent::End)
-                }
                 _ => None,
             }
         } else if *self == ClickState::Clicking {
-            *self = ClickState::ClickingLost;
-            None
+            *self = ClickState::Done;
+            // cancel the select, we lost tracking
+            Some(SelectEvent::End)
         } else {
             None
         };
@@ -283,9 +283,12 @@ impl OpenXRInput {
         let click = self.action_click.state(session, Path::NULL).unwrap();
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
 
-        let (click_is_active, click_event) = self.click_state.update(&self.action_click, session);
+        let (click_is_active, click_event) =
+            self.click_state
+                .update(&self.action_click, session, menu_selected);
         let (squeeze_is_active, squeeze_event) =
-            self.squeeze_state.update(&self.action_squeeze, session);
+            self.squeeze_state
+                .update(&self.action_squeeze, session, menu_selected);
 
         let input_frame = InputFrame {
             target_ray_origin,
