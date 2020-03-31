@@ -738,18 +738,18 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .viewer_space
             .locate(&data.space, data.frame_state.predicted_display_time)
             .unwrap();
-        let transform = Some(transform(&pose.pose));
+        let transform = transform(&pose.pose);
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let mut right = self
-            .right_hand
-            .frame(&self.session, &data.frame_state, &data.space);
-        let mut left = self
-            .left_hand
-            .frame(&self.session, &data.frame_state, &data.space);
+        let mut right =
+            self.right_hand
+                .frame(&self.session, &data.frame_state, &data.space, &transform);
+        let mut left =
+            self.left_hand
+                .frame(&self.session, &data.frame_state, &data.space, &transform);
 
         // views() needs to reacquire the lock.
         drop(data);
@@ -777,7 +777,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let frame = Frame {
-            transform,
+            transform: Some(transform),
             inputs: vec![right.frame, left.frame],
             events,
             time_ns,
