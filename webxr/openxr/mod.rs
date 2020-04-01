@@ -216,7 +216,7 @@ struct OpenXrDevice {
 /// surface provider that runs in the webgl thread.
 struct SharedData {
     openxr_views: Vec<openxr::View>,
-    frame_state: FrameState,
+    frame_state: Option<FrameState>,
     frame_stream: FrameStream<D3D11>,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
@@ -293,7 +293,7 @@ impl SurfaceProvider for OpenXrProvider {
 
         data.frame_stream
             .end(
-                data.frame_state.predicted_display_time,
+                data.frame_state.as_ref().unwrap().predicted_display_time,
                 self.blend_mode,
                 &layers[..],
             )
@@ -443,7 +443,7 @@ impl OpenXrDevice {
         let _requirements = D3D11::requirements(&instance, system)
             .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
 
-        let (session, mut frame_waiter, frame_stream) = unsafe {
+        let (session, frame_waiter, frame_stream) = unsafe {
             instance
                 .create_session::<D3D11>(
                     system,
@@ -501,9 +501,6 @@ impl OpenXrDevice {
             height: right_view_configuration.recommended_image_rect_height as i32,
         };
 
-        // Obtain view info
-        let frame_state = frame_waiter.wait().expect("error waiting for frame");
-
         // Create swapchains
 
         // XXXManishearth should we be doing this, or letting Servo set the format?
@@ -542,7 +539,7 @@ impl OpenXrDevice {
 
         let shared_data = Arc::new(Mutex::new(SharedData {
             frame_stream,
-            frame_state,
+            frame_state: None,
             space,
             openxr_views: vec![],
             left_extent,
@@ -655,17 +652,22 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 
     fn views(&self) -> Views {
+        let data = self.shared_data.lock().unwrap();
+        let frame_state = if let Some(ref fs) = data.frame_state {
+            fs
+        } else {
+            // This data isn't accessed till the first frame, so it
+            // doesn't really matter what it is right now
+            return Views::Stereo(Default::default(), Default::default());
+        };
+
         let left_view_configuration = &self.view_configurations[0];
         let right_view_configuration = &self.view_configurations[1];
         let (_view_flags, views) = self
             .session
             .locate_views(
                 ViewConfigurationType::PRIMARY_STEREO,
-                self.shared_data
-                    .lock()
-                    .unwrap()
-                    .frame_state
-                    .predicted_display_time,
+                frame_state.predicted_display_time,
                 &self.viewer_space,
             )
             .expect("error locating views");
@@ -717,7 +719,9 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let mut data = self.shared_data.lock().unwrap();
-        data.frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        let needs_view_update = data.frame_state.is_none();
+        let frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+
         let time_ns = time::precise_time_ns();
 
         data.frame_stream
@@ -729,14 +733,14 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .session
             .locate_views(
                 ViewConfigurationType::PRIMARY_STEREO,
-                data.frame_state.predicted_display_time,
+                frame_state.predicted_display_time,
                 &data.space,
             )
             .expect("error locating views");
         data.openxr_views = views;
         let pose = self
             .viewer_space
-            .locate(&data.space, data.frame_state.predicted_display_time)
+            .locate(&data.space, frame_state.predicted_display_time)
             .unwrap();
         let transform = transform(&pose.pose);
 
@@ -744,17 +748,18 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         self.session.sync_actions(&[active_action_set]).unwrap();
 
-        let mut right =
-            self.right_hand
-                .frame(&self.session, &data.frame_state, &data.space, &transform);
-        let mut left =
-            self.left_hand
-                .frame(&self.session, &data.frame_state, &data.space, &transform);
+        let mut right = self
+            .right_hand
+            .frame(&self.session, &frame_state, &data.space, &transform);
+        let mut left = self
+            .left_hand
+            .frame(&self.session, &frame_state, &data.space, &transform);
 
+        data.frame_state = Some(frame_state);
         // views() needs to reacquire the lock.
         drop(data);
 
-        let events = if self.clip_planes.recently_updated() {
+        let events = if self.clip_planes.recently_updated() || needs_view_update {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
         } else {
             vec![]
