@@ -24,6 +24,7 @@ pub enum EntityType {
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 /// https://immersive-web.github.io/hit-test/#dictdef-xrhittestoptionsinit
 pub struct HitTestSource {
+    pub id: HitTestId,
     pub space: Space,
     pub ray: Ray,
     pub types: EntityTypes,

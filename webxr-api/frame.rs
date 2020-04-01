@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::Floor;
+use crate::HitTestId;
 use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
@@ -40,4 +41,5 @@ pub struct Frame {
 pub enum FrameUpdateEvent {
     UpdateViews(Views),
     UpdateFloorTransform(Option<RigidTransform3D<f32, Native, Floor>>),
+    HitTestSourceAdded(HitTestId),
 }

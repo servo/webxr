@@ -8,6 +8,8 @@ use crate::Event;
 use crate::Floor;
 use crate::Frame;
 use crate::FrameUpdateEvent;
+use crate::HitTestId;
+use crate::HitTestSource;
 use crate::InputSource;
 use crate::Native;
 use crate::Receiver;
@@ -101,6 +103,8 @@ enum SessionMsg {
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
     StartRenderLoop,
     RenderAnimationFrame(/* request time */ u64),
+    RequestHitTest(HitTestSource),
+    CancelHitTest(HitTestId),
     Quit,
 }
 
@@ -195,11 +199,20 @@ impl Session {
         match event {
             FrameUpdateEvent::UpdateViews(views) => self.views = views,
             FrameUpdateEvent::UpdateFloorTransform(floor) => self.floor_transform = floor,
+            FrameUpdateEvent::HitTestSourceAdded(_) => (),
         }
     }
 
     pub fn granted_features(&self) -> &[String] {
         &self.granted_features
+    }
+
+    pub fn request_hit_test(&self, source: HitTestSource) {
+        let _ = self.sender.send(SessionMsg::RequestHitTest(source));
+    }
+
+    pub fn cancel_hit_test(&self, id: HitTestId) {
+        let _ = self.sender.send(SessionMsg::CancelHitTest(id));
     }
 }
 
@@ -287,6 +300,12 @@ where
             }
             SessionMsg::SetEventDest(dest) => {
                 self.device.set_event_dest(dest);
+            }
+            SessionMsg::RequestHitTest(source) => {
+                self.device.request_hit_test(source);
+            }
+            SessionMsg::CancelHitTest(id) => {
+                self.device.cancel_hit_test(id);
             }
             SessionMsg::StartRenderLoop => {
                 let frame = match self.device.wait_for_animation_frame() {

@@ -9,6 +9,8 @@ use crate::Error;
 use crate::Event;
 use crate::Floor;
 use crate::Frame;
+use crate::HitTestId;
+use crate::HitTestSource;
 use crate::InputSource;
 use crate::Native;
 use crate::Quitter;
@@ -82,6 +84,14 @@ pub trait DeviceAPI<Surface>: 'static {
     }
 
     fn granted_features(&self) -> &[String];
+
+    fn request_hit_test(&mut self, _source: HitTestSource) {
+        panic!("This device does not support requesting hit tests");
+    }
+
+    fn cancel_hit_test(&mut self, _id: HitTestId) {
+        panic!("This device does not support hit tests");
+    }
 }
 
 impl<SwapChains: 'static> DiscoveryAPI<SwapChains> for Box<dyn DiscoveryAPI<SwapChains>> {
