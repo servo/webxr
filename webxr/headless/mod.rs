@@ -260,6 +260,7 @@ impl HeadlessDeviceData {
             events: vec![],
             time_ns,
             sent_time: 0,
+            hit_test_results: vec![],
         }
     }
 

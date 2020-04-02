@@ -1,5 +1,7 @@
 use crate::ApiSpace;
+use crate::Native;
 use crate::Space;
+use euclid::RigidTransform3D;
 use euclid::Vector3D;
 use std::iter::FromIterator;
 
@@ -42,6 +44,18 @@ pub struct EntityTypes {
     pub plane: bool,
     pub mesh: bool,
 }
+
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub struct HitTestResult {
+    pub id: HitTestId,
+    pub space: RigidTransform3D<f32, HitTestSpace, Native>,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+/// The coordinate space of a hit test result
+pub struct HitTestSpace;
 
 impl EntityTypes {
     pub fn is_type(self, ty: EntityType) -> bool {

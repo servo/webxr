@@ -38,7 +38,9 @@ pub use frame::FrameUpdateEvent;
 pub use hittest::EntityType;
 pub use hittest::EntityTypes;
 pub use hittest::HitTestId;
+pub use hittest::HitTestResult;
 pub use hittest::HitTestSource;
+pub use hittest::HitTestSpace;
 pub use hittest::Ray;
 
 pub use input::Handedness;

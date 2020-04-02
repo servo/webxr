@@ -425,6 +425,7 @@ impl Device for MagicLeapDevice {
             events,
             time_ns,
             sent_time: 0,
+            hit_test_result: vec![],
         })
     }
 
