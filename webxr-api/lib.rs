@@ -42,6 +42,7 @@ pub use hittest::HitTestResult;
 pub use hittest::HitTestSource;
 pub use hittest::HitTestSpace;
 pub use hittest::Ray;
+pub use hittest::Triangle;
 
 pub use input::Handedness;
 pub use input::InputFrame;
