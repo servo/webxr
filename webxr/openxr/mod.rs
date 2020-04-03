@@ -121,8 +121,29 @@ impl OpenXrDiscovery {
     }
 }
 
-fn create_instance() -> Result<Instance, String> {
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+pub(crate) enum HandInteraction {
+    None,
+    Preview,
+    Final,
+}
+
+struct CreatedInstance {
+    instance: Instance,
+    interaction: HandInteraction,
+}
+
+fn create_instance() -> Result<CreatedInstance, String> {
     let entry = Entry::load().map_err(|e| format!("{:?}", e))?;
+    let supported = entry
+        .enumerate_extensions()
+        .map_err(|e| format!("{:?}", e))?;
+    let preview = supported
+        .other
+        .iter()
+        .find(|f| &**f == "XR_MSFT_hand_interaction_preview\0")
+        .is_some();
+
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -132,10 +153,23 @@ fn create_instance() -> Result<Instance, String> {
 
     let mut exts = ExtensionSet::default();
     exts.khr_d3d11_enable = true;
+    let interaction = if supported.msft_hand_interaction {
+        exts.msft_hand_interaction = true;
+        HandInteraction::Final
+    } else if preview {
+        exts.other.push("XR_MSFT_hand_interaction_preview\0".into());
+        HandInteraction::Preview
+    } else {
+        HandInteraction::None
+    };
 
-    entry
+    let inst = entry
         .create_instance(&app_info, &exts)
-        .map_err(|e| format!("{:?}", e))
+        .map_err(|e| format!("{:?}", e))?;
+    Ok(CreatedInstance {
+        instance: inst,
+        interaction,
+    })
 }
 
 fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
@@ -163,7 +197,11 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
         init: &SessionInit,
         xr: SessionBuilder,
     ) -> Result<WebXrSession, Error> {
-        let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
+        let CreatedInstance {
+            instance,
+            interaction,
+        } = create_instance().map_err(|e| Error::BackendSpecific(e))?;
+
         if self.supports_session(mode) {
             let gl_thread = self.gl_thread.clone();
             let provider_registration = self.provider_registration.clone();
@@ -178,6 +216,7 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
                     granted_features,
                     id,
                     context_menu_provider,
+                    interaction,
                 )
             })
         } else {
@@ -410,6 +449,7 @@ impl OpenXrDevice {
         granted_features: Vec<String>,
         id: SessionId,
         context_menu_provider: Box<dyn ContextMenuProvider>,
+        interaction: HandInteraction,
     ) -> Result<OpenXrDevice, Error> {
         let (device_tx, device_rx) = crossbeam_channel::unbounded();
         let (provider_tx, provider_rx) = crossbeam_channel::unbounded();
@@ -560,7 +600,8 @@ impl OpenXrDevice {
 
         // input
 
-        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session);
+        let (action_set, right_hand, left_hand) =
+            OpenXRInput::setup_inputs(&instance, &session, interaction);
 
         Ok(OpenXrDevice {
             instance,

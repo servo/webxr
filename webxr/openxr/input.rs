@@ -80,7 +80,8 @@ const IDENTITY_POSE: Posef = Posef {
         z: 0.,
     },
 };
-pub struct OpenXRInput {
+
+pub(crate) struct OpenXRInput {
     id: InputId,
     action_aim_pose: Action<Posef>,
     action_aim_space: Space,
@@ -159,10 +160,35 @@ impl OpenXRInput {
         }
     }
 
-    pub fn setup_inputs(instance: &Instance, session: &Session<D3D11>) -> (ActionSet, Self, Self) {
+    pub fn setup_inputs(
+        instance: &Instance,
+        session: &Session<D3D11>,
+        interaction: super::HandInteraction,
+    ) -> (ActionSet, Self, Self) {
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
         let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
         let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
+
+        if interaction != super::HandInteraction::None {
+            let mut bindings =
+                right_hand.get_bindings(instance, "select/value", Some("squeeze/value"));
+            bindings.extend(
+                left_hand
+                    .get_bindings(instance, "select/value", Some("squeeze/value"))
+                    .into_iter(),
+            );
+
+            let path = if interaction == super::HandInteraction::Final {
+                "/interaction_profiles/microsoft/hand_interaction"
+            } else {
+                "/interaction_profiles/microsoft/hand_interaction_preview"
+            };
+
+            let path_controller = instance.string_to_path(path).unwrap();
+            instance
+                .suggest_interaction_profile_bindings(path_controller, &bindings)
+                .unwrap();
+        }
 
         let mut bindings =
             right_hand.get_bindings(instance, "trigger/value", Some("squeeze/click"));
