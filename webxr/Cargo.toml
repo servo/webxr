@@ -36,7 +36,7 @@ profile = ["webxr-api/profile"]
 [dependencies]
 webxr-api = { path = "../webxr-api" }
 crossbeam-channel = "0.4"
-euclid = "0.20"
+euclid = "0.20.10"
 gleam = "0.9"
 glutin = { version = "0.21", optional = true }
 log = "0.4.6"

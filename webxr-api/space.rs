@@ -13,7 +13,8 @@ pub enum BaseSpace {
     Local,
     Floor,
     Viewer,
-    Input(InputId),
+    TargetRay(InputId),
+    Grip(InputId),
 }
 
 #[derive(Clone, Copy, Debug)]
