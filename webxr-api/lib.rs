@@ -57,8 +57,10 @@ pub use mock::MockDeviceMsg;
 pub use mock::MockDiscoveryAPI;
 pub use mock::MockInputInit;
 pub use mock::MockInputMsg;
+pub use mock::MockRegion;
 pub use mock::MockViewInit;
 pub use mock::MockViewsInit;
+pub use mock::MockWorld;
 
 pub use registry::MainThreadRegistry;
 pub use registry::MainThreadWaker;

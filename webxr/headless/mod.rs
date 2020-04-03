@@ -266,6 +266,8 @@ impl HeadlessDeviceData {
 
     fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
+            MockDeviceMsg::SetWorld(_) => unimplemented!(),
+            MockDeviceMsg::ClearWorld => unimplemented!(),
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
             }
