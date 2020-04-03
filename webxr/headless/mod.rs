@@ -5,7 +5,7 @@
 use crate::SessionBuilder;
 use crate::SwapChains;
 
-use webxr_api::util::{self, ClipPlanes};
+use webxr_api::util::{self, ClipPlanes, HitTestList};
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
@@ -14,6 +14,8 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
+use webxr_api::HitTestId;
+use webxr_api::HitTestSource;
 use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputSource;
@@ -23,6 +25,7 @@ use webxr_api::MockDiscoveryAPI;
 use webxr_api::MockInputMsg;
 use webxr_api::MockViewInit;
 use webxr_api::MockViewsInit;
+use webxr_api::MockWorld;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Receiver;
@@ -61,6 +64,7 @@ struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
     mode: SessionMode,
     clip_planes: ClipPlanes,
+    hit_tests: HitTestList,
     granted_features: Vec<String>,
 }
 
@@ -75,6 +79,7 @@ struct HeadlessDeviceData {
     events: EventBuffer,
     quitter: Option<Quitter>,
     disconnected: bool,
+    world: Option<MockWorld>,
 }
 
 impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
@@ -97,6 +102,7 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
             events: Default::default(),
             quitter: None,
             disconnected: false,
+            world: init.world,
         };
         let data = Arc::new(Mutex::new(data));
         let data_ = data.clone();
@@ -138,6 +144,7 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
                 mode,
                 clip_planes,
                 granted_features,
+                hit_tests: HitTestList::default(),
             })
         })
     }
@@ -229,6 +236,14 @@ impl DeviceAPI<Surface> for HeadlessDevice {
     fn granted_features(&self) -> &[String] {
         &self.granted_features
     }
+
+    fn request_hit_test(&mut self, source: HitTestSource) {
+        self.hit_tests.request_hit_test(source)
+    }
+
+    fn cancel_hit_test(&mut self, id: HitTestId) {
+        self.hit_tests.cancel_hit_test(id)
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -266,8 +281,8 @@ impl HeadlessDeviceData {
 
     fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
-            MockDeviceMsg::SetWorld(_) => unimplemented!(),
-            MockDeviceMsg::ClearWorld => unimplemented!(),
+            MockDeviceMsg::SetWorld(w) => self.world = Some(w),
+            MockDeviceMsg::ClearWorld => self.world = None,
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
             }
