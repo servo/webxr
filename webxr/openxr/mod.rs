@@ -130,10 +130,8 @@ fn create_instance() -> Result<Instance, String> {
         engine_version: 1,
     };
 
-    let exts = ExtensionSet {
-        khr_d3d11_enable: true,
-        ..Default::default()
-    };
+    let mut exts = ExtensionSet::default();
+    exts.khr_d3d11_enable = true;
 
     entry
         .create_instance(&app_info, &exts)
