@@ -5,7 +5,6 @@
 use crate::SessionBuilder;
 use crate::SwapChains;
 
-use euclid::default::Size2D as UntypedSize2D;
 use euclid::Angle;
 use euclid::Point2D;
 use euclid::Rect;
@@ -22,14 +21,18 @@ use gleam::gl::GLsizei;
 use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
-use glutin::EventsLoop;
-use glutin::EventsLoopClosed;
-
 use std::rc::Rc;
 
-use surfman::platform::generic::universal::context::Context;
-use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
+use surfman::Adapter;
+use surfman::Connection;
+use surfman::Context;
+use surfman::ContextAttributes;
+use surfman::Device as SurfmanDevice;
+use surfman::GLApi;
+use surfman::NativeWidget;
+use surfman::Surface;
+use surfman::SurfaceAccess;
+use surfman::SurfaceType;
 
 use webxr_api::util::ClipPlanes;
 use webxr_api::DeviceAPI;
@@ -55,25 +58,31 @@ const HEIGHT: f32 = 1.0;
 const EYE_DISTANCE: f32 = 0.25;
 
 pub trait GlWindow {
-    fn make_current(&self);
-    fn swap_buffers(&self);
-    fn size(&self) -> UntypedSize2D<GLsizei>;
-    fn new_window(&self) -> Result<Rc<dyn GlWindow>, ()>;
+    fn get_native_widget(&self, device: &SurfmanDevice) -> NativeWidget;
     fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit>;
     fn get_translation(&self) -> Vector3D<f32, UnknownUnit>;
 }
 
 pub struct GlWindowDiscovery {
-    gl: Rc<dyn Gl>,
-    factory: Box<dyn Fn() -> Result<Rc<dyn GlWindow>, ()>>,
+    connection: Connection,
+    adapter: Adapter,
+    context_attributes: ContextAttributes,
+    factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
 }
 
 impl GlWindowDiscovery {
     pub fn new(
-        gl: Rc<dyn Gl>,
-        factory: Box<dyn Fn() -> Result<Rc<dyn GlWindow>, ()>>,
+        connection: Connection,
+        adapter: Adapter,
+        context_attributes: ContextAttributes,
+        factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
     ) -> GlWindowDiscovery {
-        GlWindowDiscovery { gl, factory }
+        GlWindowDiscovery {
+            connection,
+            adapter,
+            context_attributes,
+            factory,
+        }
     }
 }
 
@@ -86,9 +95,19 @@ impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
     ) -> Result<Session, Error> {
         if self.supports_session(mode) {
             let granted_features = init.validate(mode, &["local-floor".into()])?;
-            let gl = self.gl.clone();
+            let connection = self.connection.clone();
+            let adapter = self.adapter.clone();
+            let context_attributes = self.context_attributes.clone();
             let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
-            xr.run_on_main_thread(move || GlWindowDevice::new(gl, window, granted_features))
+            xr.run_on_main_thread(move || {
+                GlWindowDevice::new(
+                    connection,
+                    adapter,
+                    context_attributes,
+                    window,
+                    granted_features,
+                )
+            })
         } else {
             Err(Error::NoMatchingDevice)
         }
@@ -103,7 +122,7 @@ pub struct GlWindowDevice {
     device: SurfmanDevice,
     context: Context,
     gl: Rc<dyn Gl>,
-    window: Rc<dyn GlWindow>,
+    window: Box<dyn GlWindow>,
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
@@ -123,7 +142,17 @@ impl DeviceAPI<Surface> for GlWindowDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
-        self.window.swap_buffers();
+        let mut surface = self
+            .device
+            .unbind_surface_from_context(&mut self.context)
+            .unwrap()
+            .unwrap();
+        self.device
+            .present_surface(&self.context, &mut surface)
+            .unwrap();
+        self.device
+            .bind_surface_to_context(&mut self.context, surface)
+            .unwrap();
         let time_ns = time::precise_time_ns();
         let translation = Vector3D::from_untyped(self.window.get_translation());
         let translation: RigidTransform3D<_, _, Native> =
@@ -146,7 +175,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
     }
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
-        self.window.make_current();
+        self.device.make_context_current(&self.context).unwrap();
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
         let size = self.device.surface_info(&surface).size;
@@ -154,11 +183,16 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             .device
             .create_surface_texture(&mut self.context, surface)
             .unwrap();
-        let texture_id = surface_texture.gl_texture();
+        let texture_id = self.device.surface_texture_object(&surface_texture);
 
         let width = size.width as GLsizei;
         let height = size.height as GLsizei;
-        let inner_size = self.window.size();
+        let inner_size = self
+            .device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .unwrap()
+            .size;
 
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
@@ -233,26 +267,49 @@ impl Drop for GlWindowDevice {
 
 impl GlWindowDevice {
     fn new(
-        gl: Rc<dyn Gl>,
-        window: Rc<dyn GlWindow>,
+        connection: Connection,
+        adapter: Adapter,
+        context_attributes: ContextAttributes,
+        window: Box<dyn GlWindow>,
         granted_features: Vec<String>,
     ) -> Result<GlWindowDevice, Error> {
-        window.make_current();
+        let mut device = connection.create_device(&adapter).unwrap();
+        let context_descriptor = device
+            .create_context_descriptor(&context_attributes)
+            .unwrap();
+        let mut context = device.create_context(&context_descriptor).unwrap();
+        let native_widget = window.get_native_widget(&device);
+        let surface_type = SurfaceType::Widget { native_widget };
+        let surface = device
+            .create_surface(&context, SurfaceAccess::GPUOnly, surface_type)
+            .unwrap();
+        device.make_context_current(&context).unwrap();
+        device
+            .bind_surface_to_context(&mut context, surface)
+            .unwrap();
 
-        // Slightly annoyingly the API fpr bootstrapping surfman is different
-        // depending on whether ANGLE is being used or not, since ANGLE
-        // provides both the software and hardware contexts.
-        // This will get fixed with a new API for bootstrapping surfman.
-        // https://github.com/pcwalton/surfman/issues/30
-        #[cfg(target_os = "windows")]
-        let (device, context) =
-            unsafe { SurfmanDevice::from_current_context() }.or(Err(Error::NoMatchingDevice))?;
-        #[cfg(not(target_os = "windows"))]
-        let (device, context) = unsafe { SurfmanDevice::from_current_hardware_context() }
-            .or(Err(Error::NoMatchingDevice))?;
-
+        let gl = match device.gl_api() {
+            GLApi::GL => unsafe { gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) },
+            GLApi::GLES => unsafe {
+                gl::GlesFns::load_with(|s| device.get_proc_address(&context, s))
+            },
+        };
         let read_fbo = gl.gen_framebuffers(1)[0];
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        let framebuffer_object = device
+            .context_surface_info(&context)
+            .unwrap()
+            .map(|info| info.framebuffer_object)
+            .unwrap_or(0);
+        gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
+        debug_assert_eq!(
+            (
+                gl.get_error(),
+                gl.check_frame_buffer_status(gl::FRAMEBUFFER)
+            ),
+            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+        );
 
         Ok(GlWindowDevice {
             gl,
@@ -267,7 +324,12 @@ impl GlWindowDevice {
     }
 
     fn view<Eye>(&self, is_right: bool) -> View<Eye> {
-        let window_size = self.window.size();
+        let window_size = self
+            .device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .unwrap()
+            .size;
         let viewport_size = Size2D::new(window_size.width / 2, window_size.height);
         let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
         let viewport_origin = Point2D::new(viewport_x_origin, 0);
@@ -291,7 +353,12 @@ impl GlWindowDevice {
         let near = self.clip_planes.near;
         let far = self.clip_planes.far;
         // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
-        let size = self.window.size();
+        let size = self
+            .device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .unwrap()
+            .size;
         let width = size.width as f32;
         let height = size.height as f32;
         let fov_up = Angle::radians(f32::fast_atan2(2.0 * height, width));
@@ -312,5 +379,3 @@ impl GlWindowDevice {
         }
     }
 }
-
-pub type EventsLoopFactory = Box<dyn Fn() -> Result<EventsLoop, EventsLoopClosed>>;

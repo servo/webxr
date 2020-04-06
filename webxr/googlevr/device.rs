@@ -44,9 +44,10 @@ use std::{mem, ptr};
 use super::discovery::SendPtr;
 use super::input::GoogleVRController;
 
-use surfman::platform::generic::universal::context::Context as SurfmanContext;
-use surfman::platform::generic::universal::device::Device as SurfmanDevice;
-use surfman::platform::generic::universal::surface::Surface;
+use surfman::Connection as SurfmanConnection;
+use surfman::Context as SurfmanContext;
+use surfman::Device as SurfmanDevice;
+use surfman::Surface;
 
 #[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
@@ -212,7 +213,52 @@ impl GoogleVRDevice {
         // Initializes gvr necessary GL-related objects.
         gvr::gvr_initialize_gl(self.ctx);
 
-        self.surfman = SurfmanDevice::from_current_hardware_context().ok();
+        let connection = SurfmanConnection::new().expect("Failed to create surfman connection");
+        let adapter = connection
+            .create_adapter()
+            .expect("Failed to create surfman adapter");
+        let device = connection
+            .create_device(&adapter)
+            .expect("Failed to create surfman device");
+
+        #[cfg(target_os = "linux")]
+        let native_context = {
+            use surfman::platform::generic::multi;
+            use surfman::platform::unix::generic;
+            use surfman::platform::unix::wayland;
+            use surfman::platform::unix::x11;
+            match device {
+                multi::device::Device::Default(multi::device::Device::Default(_)) => {
+                    multi::context::NativeContext::Default(multi::context::NativeContext::Default(
+                        wayland::context::NativeContext::current()
+                            .expect("Failed to bootstrap wayland context"),
+                    ))
+                }
+                multi::device::Device::Default(multi::device::Device::Alternate(_)) => {
+                    multi::context::NativeContext::Default(
+                        multi::context::NativeContext::Alternate(
+                            x11::context::NativeContext::current()
+                                .expect("Failed to bootstrap x11 context"),
+                        ),
+                    )
+                }
+                multi::device::Device::Alternate(_) => multi::context::NativeContext::Alternate(
+                    generic::context::NativeContext::current()
+                        .expect("Failed to bootstrap generic context"),
+                ),
+            }
+        };
+        #[cfg(not(target_os = "linux"))]
+        let native_context = {
+            use surfman::device::Device as SurfmanDeviceAPI;
+            type NativeContext = <SurfmanDevice as SurfmanDeviceAPI>::NativeContext;
+            NativeContext::current().expect("Failed to bootstrap native context")
+        };
+        let context = device
+            .create_context_from_native_context(native_context)
+            .expect("Failed to bootstrap surfman context");
+
+        self.surfman = Some((device, context));
 
         // GVR_FEATURE_MULTIVIEW must be checked after gvr_initialize_gl is called or the function will crash.
         if self.multiview && !gvr::gvr_is_feature_supported(self.ctx, GVR_FEATURE_MULTIVIEW as i32)
@@ -575,7 +621,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         let surface_texture = device
             .create_surface_texture(&mut context, surface)
             .unwrap();
-        let texture_id = surface_texture.gl_texture();
+        let texture_id = device.surface_texture_object(&surface_texture);
         let texture_target = device.surface_gl_texture_target();
         self.render_layer(texture_id, texture_size, texture_target);
         self.submit_frame();

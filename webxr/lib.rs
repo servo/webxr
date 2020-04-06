@@ -29,7 +29,7 @@ mod egl;
 pub mod openxr;
 
 /// A type synonym for swap chains
-pub type SwapChains = surfman_chains::SwapChains<webxr_api::SwapChainId>;
+pub type SwapChains = surfman_chains::SwapChains<webxr_api::SwapChainId, surfman::Device>;
 
 /// A type synonym for the main thread registry
 pub type MainThreadRegistry = webxr_api::MainThreadRegistry<SwapChains>;

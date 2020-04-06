@@ -33,16 +33,9 @@ fn main() {
     // EGL bindings
     if cfg!(feature = "egl") {
         let mut file = File::create(&Path::new(&out_dir).join("egl_bindings.rs")).unwrap();
-        Registry::new(
-            Api::Egl,
-            (1, 5),
-            Profile::Core,
-            Fallbacks::All,
-            ["EGL_KHR_fence_sync"],
-        )
-        .write_bindings(gl_generator::StaticGenerator, &mut file)
-        .unwrap();
-        println!("cargo:rustc-link-lib=EGL");
+        Registry::new(Api::Egl, (1, 5), Profile::Core, Fallbacks::All, [])
+            .write_bindings(gl_generator::StructGenerator, &mut file)
+            .unwrap();
     }
 
     // Magicleap C API
