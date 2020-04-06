@@ -12,7 +12,7 @@ pub struct JNIScope {
 
 impl JNIScope {
     pub unsafe fn attach() -> Result<JNIScope, String> {
-        let mut env: *mut ndk::JNIEnv = mem::uninitialized();
+        let mut env: *mut ndk::JNIEnv = ptr::null_mut();
         let activity: &ndk::ANativeActivity = mem::transmute(android::get_app().activity);
         let vm: &mut ndk::_JavaVM = mem::transmute(activity.vm);
         let vmf: &ndk::JNIInvokeInterface = mem::transmute(vm.functions);
