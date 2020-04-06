@@ -410,7 +410,7 @@ impl OpenXrDevice {
         let _ = gl_thread.execute(Box::new(move |device| {
             // Get the current surfman device and extract it's D3D device. This will ensure
             // that the OpenXR runtime's texture will be shareable with surfman's surfaces.
-	    let native_device = device.native_device();
+            let native_device = device.native_device();
             let d3d_device = native_device.d3d11_device;
             // Smuggle the pointer out as a usize value; D3D11 devices are threadsafe
             // so it's safe to use it from another thread.

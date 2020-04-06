@@ -36,11 +36,6 @@ fn main() {
         Registry::new(Api::Egl, (1, 5), Profile::Core, Fallbacks::All, [])
             .write_bindings(gl_generator::StructGenerator, &mut file)
             .unwrap();
-        if cfg!(target_os = "windows") {
-            println!("cargo:rustc-link-lib=libEGL");
-        } else {
-            println!("cargo:rustc-link-lib=EGL");
-        }
     }
 
     // Magicleap C API
