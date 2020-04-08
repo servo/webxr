@@ -641,25 +641,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 
     fn views(&self) -> Views {
-        let data = self.shared_data.lock().unwrap();
-        let frame_state = if let Some(ref fs) = data.frame_state {
-            fs
-        } else {
-            // This data isn't accessed till the first frame, so it
-            // doesn't really matter what it is right now
-            return Views::Stereo(Default::default(), Default::default());
-        };
-
         let left_view_configuration = &self.view_configurations[0];
         let right_view_configuration = &self.view_configurations[1];
-        let (_view_flags, views) = self
-            .session
-            .locate_views(
-                ViewConfigurationType::PRIMARY_STEREO,
-                frame_state.predicted_display_time,
-                &self.viewer_space,
-            )
-            .expect("error locating views");
         let left_vp = Rect::new(
             Point2D::zero(),
             Size2D::new(
@@ -677,6 +660,33 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 right_view_configuration.recommended_image_rect_height as i32,
             ),
         );
+
+        let data = self.shared_data.lock().unwrap();
+        let frame_state = if let Some(ref fs) = data.frame_state {
+            fs
+        } else {
+            // This data isn't accessed till the first frame, so it
+            // doesn't really matter what it is right now
+            return Views::Stereo(
+                View {
+                    viewport: left_vp,
+                    ..Default::default()
+                },
+                View {
+                    viewport: right_vp,
+                    ..Default::default()
+                },
+            );
+        };
+
+        let (_view_flags, views) = self
+            .session
+            .locate_views(
+                ViewConfigurationType::PRIMARY_STEREO,
+                frame_state.predicted_display_time,
+                &self.viewer_space,
+            )
+            .expect("error locating views");
         let left_view = View {
             transform: transform(&views[0].pose).inverse(),
             projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
