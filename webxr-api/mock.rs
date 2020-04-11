@@ -42,8 +42,9 @@ pub trait MockDiscoveryAPI<SwapChains>: 'static {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockDeviceInit {
     pub floor_origin: Option<RigidTransform3D<f32, Floor, Native>>,
-    pub supports_immersive: bool,
-    pub supports_unbounded: bool,
+    pub supports_inline: bool,
+    pub supports_vr: bool,
+    pub supports_ar: bool,
     pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     pub views: MockViewsInit,
     pub supported_features: Vec<String>,

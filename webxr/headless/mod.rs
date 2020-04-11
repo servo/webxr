@@ -54,7 +54,9 @@ pub struct HeadlessMockDiscovery {}
 
 struct HeadlessDiscovery {
     data: Arc<Mutex<HeadlessDeviceData>>,
-    supports_immersive: bool,
+    supports_vr: bool,
+    supports_inline: bool,
+    supports_ar: bool,
 }
 
 struct InputInfo {
@@ -117,7 +119,9 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
         });
         Ok(Box::new(HeadlessDiscovery {
             data,
-            supports_immersive: init.supports_immersive,
+            supports_vr: init.supports_vr,
+            supports_inline: init.supports_inline,
+            supports_ar: init.supports_ar,
         }))
     }
 }
@@ -155,8 +159,14 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        (!self.data.lock().unwrap().disconnected)
-            && (mode == SessionMode::Inline || self.supports_immersive)
+        if self.data.lock().unwrap().disconnected {
+            return false;
+        }
+        match mode {
+            SessionMode::Inline => self.supports_inline,
+            SessionMode::ImmersiveVR => self.supports_vr,
+            SessionMode::ImmersiveAR => self.supports_ar,
+        }
     }
 }
 
@@ -216,7 +226,10 @@ impl DeviceAPI<Surface> for HeadlessDevice {
                     .filter(|region| source.types.is_type(region.ty))
                     .flat_map(|region| &region.faces)
                     .filter_map(|triangle| triangle.intersect(ray))
-                    .map(|space| HitTestResult { space, id: source.id });
+                    .map(|space| HitTestResult {
+                        space,
+                        id: source.id,
+                    });
                 frame.hit_test_results.extend(hits);
             }
         }
