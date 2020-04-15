@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::SessionBuilder;
-use crate::SwapChains;
+use crate::surfman_layer_manager::SurfmanGL;
 
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
 use webxr_api::Session;
+use webxr_api::SessionBuilder;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 
@@ -68,13 +68,13 @@ impl GoogleVRDiscovery {
     }
 }
 
-impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
+impl DiscoveryAPI<SurfmanGL> for GoogleVRDiscovery {
     #[cfg(target_os = "android")]
     fn request_session(
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder,
+        xr: SessionBuilder<SurfmanGL>,
     ) -> Result<Session, Error> {
         let (ctx, controller_ctx, java_class, java_object);
         unsafe {
@@ -85,13 +85,14 @@ impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
         }
         if self.supports_session(mode) {
             let granted_features = init.validate(mode, &[])?;
-            xr.spawn(move || {
+            xr.spawn(move |grand_manager| {
                 GoogleVRDevice::new(
                     ctx,
                     controller_ctx,
                     java_class,
                     java_object,
                     granted_features,
+                    grand_manager,
                 )
             })
         } else {
@@ -104,7 +105,7 @@ impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder,
+        xr: SessionBuilder<SurfmanGL>,
     ) -> Result<Session, Error> {
         let (ctx, controller_ctx);
         unsafe {
@@ -113,7 +114,9 @@ impl DiscoveryAPI<SwapChains> for GoogleVRDiscovery {
         }
         if self.supports_session(mode) {
             let granted_features = init.validate(mode, &[])?;
-            xr.spawn(move || GoogleVRDevice::new(ctx, controller_ctx, granted_features))
+            xr.spawn(move |grand_manager| {
+                GoogleVRDevice::new(ctx, controller_ctx, granted_features, grand_manager)
+            })
         } else {
             Err(Error::NoMatchingDevice)
         }

@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use webxr_api::util::{self, ClipPlanes};
+use webxr_api::ContextId;
 use webxr_api::DeviceAPI;
 use webxr_api::Error;
 use webxr_api::Event;
@@ -12,6 +13,10 @@ use webxr_api::Frame;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
+use webxr_api::LayerGrandManager;
+use webxr_api::LayerId;
+use webxr_api::LayerInit;
+use webxr_api::LayerManager;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Sender;
@@ -23,6 +28,8 @@ use webxr_api::Viewports;
 use webxr_api::Views;
 
 use crate::gles as gl;
+use crate::SurfmanGL;
+use crate::SurfmanLayerManager;
 
 use euclid::default::Size2D as DefaultSize2D;
 use euclid::Point2D;
@@ -48,7 +55,10 @@ use super::input::GoogleVRController;
 use surfman::Connection as SurfmanConnection;
 use surfman::Context as SurfmanContext;
 use surfman::Device as SurfmanDevice;
-use surfman::Surface;
+
+use surfman_chains::SwapChainAPI;
+use surfman_chains::SwapChains;
+use surfman_chains::SwapChainsAPI;
 
 #[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
@@ -86,6 +96,9 @@ pub(crate) struct GoogleVRDevice {
     presenting: bool,
     frame_bound: bool,
     surfman: Option<(SurfmanDevice, SurfmanContext)>,
+    layer_manager: Option<LayerManager>,
+    grand_manager: LayerGrandManager<SurfmanGL>,
+    swap_chains: SwapChains<LayerId, SurfmanDevice>,
     granted_features: Vec<String>,
 }
 
@@ -97,6 +110,7 @@ impl GoogleVRDevice {
         java_class: SendPtr<ndk::jclass>,
         java_object: SendPtr<ndk::jobject>,
         granted_features: Vec<String>,
+        grand_manager: LayerGrandManager<SurfmanGL>,
     ) -> Result<Self, Error> {
         let mut device = GoogleVRDevice {
             events: Default::default(),
@@ -125,6 +139,9 @@ impl GoogleVRDevice {
             presenting: false,
             frame_bound: false,
             surfman: None,
+            swap_chains: SwapChains::new(),
+            grand_manager,
+            layer_manager: None,
             granted_features,
         };
         unsafe {
@@ -141,6 +158,7 @@ impl GoogleVRDevice {
         ctx: SendPtr<*mut gvr::gvr_context>,
         controller_ctx: SendPtr<*mut gvr::gvr_controller_context>,
         granted_features: Vec<String>,
+        grand_manager: LayerGrandManager<SurfmanGL>,
     ) -> Result<Self, Error> {
         let mut device = GoogleVRDevice {
             events: Default::default(),
@@ -167,6 +185,9 @@ impl GoogleVRDevice {
             presenting: false,
             frame_bound: false,
             surfman: None,
+            swap_chains: SwapChains::new(),
+            grand_manager,
+            layer_manager: None,
             granted_features,
         };
         unsafe {
@@ -311,6 +332,19 @@ impl GoogleVRDevice {
 
         self.swap_chain = gvr::gvr_swap_chain_create(self.ctx, mem::transmute(&spec), 1);
         gvr::gvr_buffer_spec_destroy(mem::transmute(&spec));
+    }
+
+    fn layer_manager(&mut self) -> Result<&mut LayerManager, Error> {
+        if let Some(ref mut manager) = self.layer_manager {
+            return Ok(manager);
+        }
+        let swap_chains = self.swap_chains.clone();
+        let viewports = self.viewports();
+        let layer_manager = self.grand_manager.create_layer_manager(move |_, _| {
+            Ok(SurfmanLayerManager::new(viewports, swap_chains))
+        })?;
+        self.layer_manager = Some(layer_manager);
+        Ok(self.layer_manager.as_mut().unwrap())
     }
 
     fn recommended_render_size(&self) -> gvr::gvr_sizei {
@@ -587,7 +621,7 @@ impl GoogleVRDevice {
     }
 }
 
-impl DeviceAPI<Surface> for GoogleVRDevice {
+impl DeviceAPI for GoogleVRDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         // GoogleVR doesn't know about the floor
         // XXXManishearth perhaps we should report a guesstimate value here
@@ -604,11 +638,22 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         }
     }
 
-    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
+    fn create_layer(&mut self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error> {
+        self.layer_manager()?.create_layer(context_id, init)
+    }
+
+    fn destroy_layer(&mut self, context_id: ContextId, layer_id: LayerId) {
+        self.layer_manager()
+            .unwrap()
+            .destroy_layer(context_id, layer_id)
+    }
+
+    fn begin_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) -> Option<Frame> {
         unsafe {
             self.acquire_frame();
         }
         let time_ns = time::precise_time_ns();
+        let sub_images = self.layer_manager().ok()?.begin_frame(layers).ok()?;
 
         // Predict head matrix
         let transform = self.fetch_head_matrix();
@@ -620,26 +665,39 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
             inputs: self.input_state(),
             events: vec![],
             time_ns,
+            sub_images,
             sent_time: 0,
             hit_test_results: vec![],
         })
     }
 
-    fn render_animation_frame(&mut self, surface: Surface) -> Surface {
-        let (device, mut context) = self.surfman.take().unwrap();
-        let texture_size = device.surface_info(&surface).size;
-        let surface_texture = device
-            .create_surface_texture(&mut context, surface)
-            .unwrap();
-        let texture_id = device.surface_texture_object(&surface_texture);
-        let texture_target = device.surface_gl_texture_target();
-        self.render_layer(texture_id, texture_size, texture_target);
-        self.submit_frame();
-        let surface = device
-            .destroy_surface_texture(&mut context, surface_texture)
-            .unwrap();
-        self.surfman = Some((device, context));
-        surface
+    fn end_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) {
+        let _ = self.layer_manager().unwrap().end_frame(layers);
+
+        for &(_, layer_id) in layers {
+            let swap_chain = match self.swap_chains.get(layer_id) {
+                Some(swap_chain) => swap_chain,
+                None => continue,
+            };
+            let surface = match swap_chain.take_surface() {
+                Some(surface) => surface,
+                None => return,
+            };
+            let (device, mut context) = self.surfman.take().unwrap();
+            let texture_size = device.surface_info(&surface).size;
+            let surface_texture = device
+                .create_surface_texture(&mut context, surface)
+                .unwrap();
+            let texture_id = device.surface_texture_object(&surface_texture);
+            let texture_target = device.surface_gl_texture_target();
+            self.render_layer(texture_id, texture_size, texture_target);
+            self.submit_frame();
+            let surface = device
+                .destroy_surface_texture(&mut context, surface_texture)
+                .unwrap();
+            self.surfman = Some((device, context));
+            swap_chain.recycle_surface(surface);
+        }
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {

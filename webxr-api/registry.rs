@@ -5,6 +5,8 @@
 use crate::DiscoveryAPI;
 use crate::Error;
 use crate::Frame;
+use crate::GLTypes;
+use crate::LayerGrandManager;
 use crate::MainThreadSession;
 use crate::MockDeviceInit;
 use crate::MockDeviceMsg;
@@ -16,11 +18,8 @@ use crate::SessionBuilder;
 use crate::SessionId;
 use crate::SessionInit;
 use crate::SessionMode;
-use crate::SwapChainId;
 
 use log::warn;
-
-use surfman_chains_api::SwapChainsAPI;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -32,14 +31,14 @@ pub struct Registry {
     waker: MainThreadWakerImpl,
 }
 
-pub struct MainThreadRegistry<SwapChains> {
-    discoveries: Vec<Box<dyn DiscoveryAPI<SwapChains>>>,
+pub struct MainThreadRegistry<GL> {
+    discoveries: Vec<Box<dyn DiscoveryAPI<GL>>>,
     sessions: Vec<Box<dyn MainThreadSession>>,
-    mocks: Vec<Box<dyn MockDiscoveryAPI<SwapChains>>>,
-    swap_chains: Option<SwapChains>,
+    mocks: Vec<Box<dyn MockDiscoveryAPI<GL>>>,
     sender: Sender<RegistryMsg>,
     receiver: Receiver<RegistryMsg>,
     waker: MainThreadWakerImpl,
+    grand_manager: LayerGrandManager<GL>,
     next_session_id: u32,
 }
 
@@ -122,25 +121,24 @@ impl Registry {
     }
 }
 
-impl<SwapChains> MainThreadRegistry<SwapChains>
-where
-    SwapChains: SwapChainsAPI<SwapChainId>,
-{
-    pub fn new(waker: Box<dyn MainThreadWaker>) -> Result<Self, Error> {
+impl<GL: 'static + GLTypes> MainThreadRegistry<GL> {
+    pub fn new(
+        waker: Box<dyn MainThreadWaker>,
+        grand_manager: LayerGrandManager<GL>,
+    ) -> Result<Self, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
         let discoveries = Vec::new();
         let sessions = Vec::new();
         let mocks = Vec::new();
-        let swap_chains = None;
         let waker = MainThreadWakerImpl::new(waker)?;
         Ok(MainThreadRegistry {
             discoveries,
             sessions,
             mocks,
-            swap_chains,
             sender,
             receiver,
             waker,
+            grand_manager,
             next_session_id: 0,
         })
     }
@@ -152,15 +150,24 @@ where
         }
     }
 
-    pub fn register<D: DiscoveryAPI<SwapChains>>(&mut self, discovery: D) {
+    pub fn register<D>(&mut self, discovery: D)
+    where
+        D: DiscoveryAPI<GL>,
+    {
         self.discoveries.push(Box::new(discovery));
     }
 
-    pub fn register_mock<D: MockDiscoveryAPI<SwapChains>>(&mut self, discovery: D) {
+    pub fn register_mock<D>(&mut self, discovery: D)
+    where
+        D: MockDiscoveryAPI<GL>,
+    {
         self.mocks.push(Box::new(discovery));
     }
 
-    pub fn run_on_main_thread<S: MainThreadSession>(&mut self, session: S) {
+    pub fn run_on_main_thread<S>(&mut self, session: S)
+    where
+        S: MainThreadSession,
+    {
         self.sessions.push(Box::new(session));
     }
 
@@ -192,10 +199,6 @@ where
         }
     }
 
-    pub fn set_swap_chains(&mut self, swap_chains: SwapChains) {
-        self.swap_chains = Some(swap_chains);
-    }
-
     fn supports_session(&mut self, mode: SessionMode) -> Result<(), Error> {
         for discovery in &self.discoveries {
             if discovery.supports_session(mode) {
@@ -211,13 +214,17 @@ where
         init: SessionInit,
         raf_sender: Sender<Frame>,
     ) -> Result<Session, Error> {
-        let swap_chains = self.swap_chains.as_mut().ok_or(Error::NoMatchingDevice)?;
         for discovery in &mut self.discoveries {
             if discovery.supports_session(mode) {
+                let raf_sender = raf_sender.clone();
                 let id = SessionId(self.next_session_id);
                 self.next_session_id += 1;
-                let xr =
-                    SessionBuilder::new(swap_chains, &mut self.sessions, raf_sender.clone(), id);
+                let xr = SessionBuilder::new(
+                    &mut self.sessions,
+                    raf_sender,
+                    self.grand_manager.clone(),
+                    id,
+                );
                 match discovery.request_session(mode, &init, xr) {
                     Ok(session) => return Ok(session),
                     Err(err) => warn!("XR device error {:?}", err),

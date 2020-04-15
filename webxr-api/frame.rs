@@ -7,6 +7,7 @@ use crate::HitTestId;
 use crate::HitTestResult;
 use crate::InputFrame;
 use crate::Native;
+use crate::SubImages;
 use crate::Viewer;
 use crate::Viewports;
 use crate::Views;
@@ -26,6 +27,9 @@ pub struct Frame {
 
     /// Events that occur with the frame.
     pub events: Vec<FrameUpdateEvent>,
+
+    /// The subimages to render to
+    pub sub_images: Vec<SubImages>,
 
     /// Value of time::precise_time_ns() when frame was obtained
     pub time_ns: u64,

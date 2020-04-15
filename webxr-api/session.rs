@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::channel;
+use crate::ContextId;
 use crate::DeviceAPI;
 use crate::Error;
 use crate::Event;
@@ -11,10 +13,12 @@ use crate::FrameUpdateEvent;
 use crate::HitTestId;
 use crate::HitTestSource;
 use crate::InputSource;
+use crate::LayerGrandManager;
+use crate::LayerId;
+use crate::LayerInit;
 use crate::Native;
 use crate::Receiver;
 use crate::Sender;
-use crate::SwapChainId;
 use crate::Viewport;
 use crate::Viewports;
 
@@ -26,9 +30,6 @@ use log::warn;
 
 use std::thread;
 use std::time::Duration;
-
-use surfman_chains_api::SwapChainAPI;
-use surfman_chains_api::SwapChainsAPI;
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -105,9 +106,12 @@ pub enum EnvironmentBlendMode {
 }
 
 // The messages that are sent from the content thread to the session thread.
+#[derive(Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 enum SessionMsg {
-    SetSwapChain(Option<SwapChainId>),
+    CreateLayer(ContextId, LayerInit, Sender<Result<LayerId, Error>>),
+    DestroyLayer(ContextId, LayerId),
+    SetLayers(Vec<(ContextId, LayerId)>),
     SetEventDest(Sender<Event>),
     UpdateClipPlanes(/* near */ f32, /* far */ f32),
     StartRenderLoop,
@@ -169,7 +173,7 @@ impl Session {
     }
 
     /// A resolution large enough to contain all the viewports.
-    /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
+    /// https://immersive-web.github.io/webxr/#recommended-webgl-framebuffer-resolution
     ///
     /// Returns None if the session is inline
     pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
@@ -181,8 +185,23 @@ impl Session {
             .map(|rect| Size2D::new(rect.max_x(), rect.max_y()))
     }
 
-    pub fn set_swap_chain(&mut self, swap_chain_id: Option<SwapChainId>) {
-        let _ = self.sender.send(SessionMsg::SetSwapChain(swap_chain_id));
+    pub fn create_layer(&self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error> {
+        let (sender, receiver) = channel().map_err(|_| Error::CommunicationError)?;
+        let _ = self
+            .sender
+            .send(SessionMsg::CreateLayer(context_id, init, sender));
+        receiver.recv().map_err(|_| Error::CommunicationError)?
+    }
+
+    /// Destroy a layer
+    pub fn destroy_layer(&self, context_id: ContextId, layer_id: LayerId) {
+        let _ = self
+            .sender
+            .send(SessionMsg::DestroyLayer(context_id, layer_id));
+    }
+
+    pub fn set_layers(&self, layers: Vec<(ContextId, LayerId)>) {
+        let _ = self.sender.send(SessionMsg::SetLayers(layers));
     }
 
     pub fn start_render_loop(&mut self) {
@@ -233,11 +252,11 @@ impl Session {
 }
 
 /// For devices that want to do their own thread management, the `SessionThread` type is exposed.
-pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
+pub struct SessionThread<Device> {
     receiver: Receiver<SessionMsg>,
     sender: Sender<SessionMsg>,
-    swap_chain: Option<SwapChains::SwapChain>,
-    swap_chains: SwapChains,
+    layers: Vec<(ContextId, LayerId)>,
+    pending_layers: Option<Vec<(ContextId, LayerId)>>,
     frame_count: u64,
     frame_sender: Sender<Frame>,
     running: bool,
@@ -245,14 +264,12 @@ pub struct SessionThread<Device, SwapChains: SwapChainsAPI<SwapChainId>> {
     id: SessionId,
 }
 
-impl<Device, SwapChains> SessionThread<Device, SwapChains>
+impl<Device> SessionThread<Device>
 where
-    Device: DeviceAPI<SwapChains::Surface>,
-    SwapChains: SwapChainsAPI<SwapChainId>,
+    Device: DeviceAPI,
 {
     pub fn new(
         mut device: Device,
-        swap_chains: SwapChains,
         frame_sender: Sender<Frame>,
         id: SessionId,
     ) -> Result<Self, Error> {
@@ -261,14 +278,15 @@ where
             sender: sender.clone(),
         });
         let frame_count = 0;
-        let swap_chain = None;
         let running = true;
+        let layers = Vec::new();
+        let pending_layers = None;
         Ok(SessionThread {
             sender,
             receiver,
             device,
-            swap_chain,
-            swap_chains,
+            layers,
+            pending_layers,
             frame_count,
             frame_sender,
             running,
@@ -308,10 +326,8 @@ where
     }
 
     fn handle_msg(&mut self, msg: SessionMsg) -> bool {
+        log::debug!("processing {:?}", msg);
         match msg {
-            SessionMsg::SetSwapChain(swap_chain_id) => {
-                self.swap_chain = swap_chain_id.and_then(|id| self.swap_chains.get(id));
-            }
             SessionMsg::SetEventDest(dest) => {
                 self.device.set_event_dest(dest);
             }
@@ -321,51 +337,59 @@ where
             SessionMsg::CancelHitTest(id) => {
                 self.device.cancel_hit_test(id);
             }
+            SessionMsg::CreateLayer(context_id, layer_init, sender) => {
+                let result = self.device.create_layer(context_id, layer_init);
+                let _ = sender.send(result);
+            }
+            SessionMsg::DestroyLayer(context_id, layer_id) => {
+                self.layers.retain(|&(_, other_id)| layer_id != other_id);
+                self.device.destroy_layer(context_id, layer_id);
+            }
+            SessionMsg::SetLayers(layers) => {
+                self.pending_layers = Some(layers);
+            }
             SessionMsg::StartRenderLoop => {
-                let frame = match self.device.wait_for_animation_frame() {
+                if let Some(layers) = self.pending_layers.take() {
+                    self.layers = layers;
+                }
+                let frame = match self.device.begin_animation_frame(&self.layers[..]) {
                     Some(frame) => frame,
                     None => {
                         warn!("Device stopped providing frames, exiting");
                         return false;
                     }
                 };
-
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
             SessionMsg::RenderAnimationFrame(_sent_time) => {
                 self.frame_count += 1;
                 #[cfg(feature = "profile")]
-                let mut render_start = None;
-                if let Some(ref swap_chain) = self.swap_chain {
-                    if let Some(surface) = swap_chain.take_surface() {
-                        #[cfg(feature = "profile")]
-                        {
-                            render_start = Some(time::precise_time_ns());
-                            println!(
-                                "WEBXR PROFILING [raf transmitted]:\t{}ms",
-                                to_ms(render_start.unwrap() - _sent_time)
-                            );
-                        }
-                        let surface = self.device.render_animation_frame(surface);
-                        swap_chain.recycle_surface(surface);
-                    } else {
-                        warn!("no surface; not rendering");
-                    }
-                }
+                let render_start = time::precise_time_ns();
                 #[cfg(feature = "profile")]
-                let wait_start = time::precise_time_ns();
+                println!(
+                    "WEBXR PROFILING [raf transmitted]:\t{}ms",
+                    to_ms(render_start - _sent_time)
+                );
+
                 #[cfg(feature = "profile")]
-                {
-                    if let Some(render_start) = render_start {
-                        println!(
-                            "WEBXR PROFILING [raf render]:\t{}ms",
-                            to_ms(wait_start - render_start)
-                        );
-                    }
+                let end_frame = time::precise_time_ns();
+                self.device.end_animation_frame(&self.layers[..]);
+                #[cfg(feature = "profile")]
+                let ended_frame = time::precise_time_ns();
+                #[cfg(feature = "profile")]
+                println!(
+                    "WEBXR PROFILING [raf end frame]:\t{}ms",
+                    to_ms(ended_frame - end_frame)
+                );
+
+                #[cfg(feature = "profile")]
+                let begin_frame = time::precise_time_ns();
+                if let Some(layers) = self.pending_layers.take() {
+                    self.layers = layers;
                 }
                 #[allow(unused_mut)]
-                let mut frame = match self.device.wait_for_animation_frame() {
+                let mut frame = match self.device.begin_animation_frame(&self.layers[..]) {
                     Some(frame) => frame,
                     None => {
                         warn!("Device stopped providing frames, exiting");
@@ -373,17 +397,20 @@ where
                     }
                 };
                 #[cfg(feature = "profile")]
+                let begun_frame = time::precise_time_ns();
+                #[cfg(feature = "profile")]
                 {
-                    let wait_end = time::precise_time_ns();
                     println!(
-                        "WEBXR PROFILING [raf wait]:\t{}ms",
-                        to_ms(wait_end - wait_start)
+                        "WEBXR PROFILING [raf begin frame]:\t{}ms",
+                        to_ms(begun_frame - begin_frame)
                     );
-                    frame.sent_time = wait_end;
+                    frame.sent_time = begun_frame;
                 }
+
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::Quit => {
+                self.device.end_animation_frame(&self.layers[..]);
                 self.device.quit();
                 return false;
             }
@@ -398,10 +425,9 @@ pub trait MainThreadSession: 'static {
     fn running(&self) -> bool;
 }
 
-impl<Device, SwapChains> MainThreadSession for SessionThread<Device, SwapChains>
+impl<Device> MainThreadSession for SessionThread<Device>
 where
-    Device: DeviceAPI<SwapChains::Surface>,
-    SwapChains: SwapChainsAPI<SwapChainId>,
+    Device: DeviceAPI,
 {
     fn run_one_frame(&mut self) {
         let frame_count = self.frame_count;
@@ -430,31 +456,28 @@ where
 }
 
 /// A type for building XR sessions
-pub struct SessionBuilder<'a, SwapChains: 'a> {
-    swap_chains: &'a SwapChains,
+pub struct SessionBuilder<'a, GL> {
     sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
     frame_sender: Sender<Frame>,
+    layer_grand_manager: LayerGrandManager<GL>,
     id: SessionId,
 }
 
-impl<'a, SwapChains> SessionBuilder<'a, SwapChains>
-where
-    SwapChains: SwapChainsAPI<SwapChainId>,
-{
+impl<'a, GL: 'static> SessionBuilder<'a, GL> {
     pub fn id(&self) -> SessionId {
         self.id
     }
 
     pub(crate) fn new(
-        swap_chains: &'a SwapChains,
         sessions: &'a mut Vec<Box<dyn MainThreadSession>>,
         frame_sender: Sender<Frame>,
+        layer_grand_manager: LayerGrandManager<GL>,
         id: SessionId,
     ) -> Self {
         SessionBuilder {
-            swap_chains,
             sessions,
             frame_sender,
+            layer_grand_manager,
             id,
         }
     }
@@ -462,16 +485,16 @@ where
     /// For devices which are happy to hand over thread management to webxr.
     pub fn spawn<Device, Factory>(self, factory: Factory) -> Result<Session, Error>
     where
-        Factory: 'static + FnOnce() -> Result<Device, Error> + Send,
-        Device: DeviceAPI<SwapChains::Surface>,
+        Factory: 'static + FnOnce(LayerGrandManager<GL>) -> Result<Device, Error> + Send,
+        Device: DeviceAPI,
     {
         let (acks, ackr) = crate::channel().or(Err(Error::CommunicationError))?;
-        let swap_chains = self.swap_chains.clone();
-        let frame_sender = self.frame_sender.clone();
+        let frame_sender = self.frame_sender;
+        let layer_grand_manager = self.layer_grand_manager;
         let id = self.id;
         thread::spawn(move || {
-            match factory()
-                .and_then(|device| SessionThread::new(device, swap_chains, frame_sender, id))
+            match factory(layer_grand_manager)
+                .and_then(|device| SessionThread::new(device, frame_sender, id))
             {
                 Ok(mut thread) => {
                     let session = thread.new_session();
@@ -489,13 +512,12 @@ where
     /// For devices that need to run on the main thread.
     pub fn run_on_main_thread<Device, Factory>(self, factory: Factory) -> Result<Session, Error>
     where
-        Factory: 'static + FnOnce() -> Result<Device, Error>,
-        Device: DeviceAPI<SwapChains::Surface>,
+        Factory: 'static + FnOnce(LayerGrandManager<GL>) -> Result<Device, Error>,
+        Device: DeviceAPI,
     {
-        let device = factory()?;
-        let swap_chains = self.swap_chains.clone();
-        let frame_sender = self.frame_sender.clone();
-        let mut session_thread = SessionThread::new(device, swap_chains, frame_sender, self.id)?;
+        let device = factory(self.layer_grand_manager)?;
+        let frame_sender = self.frame_sender;
+        let mut session_thread = SessionThread::new(device, frame_sender, self.id)?;
         let session = session_thread.new_session();
         self.sessions.push(Box::new(session_thread));
         Ok(session)

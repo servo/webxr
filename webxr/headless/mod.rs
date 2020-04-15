@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::SessionBuilder;
-use crate::SwapChains;
+use crate::SurfmanGL;
+use crate::SurfmanLayerManager;
 
 use webxr_api::util::{self, ClipPlanes, HitTestList};
 use webxr_api::ApiSpace;
 use webxr_api::BaseSpace;
+use webxr_api::ContextId;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
@@ -23,6 +24,10 @@ use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
+use webxr_api::LayerGrandManager;
+use webxr_api::LayerId;
+use webxr_api::LayerInit;
+use webxr_api::LayerManager;
 use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
 use webxr_api::MockDiscoveryAPI;
@@ -38,9 +43,11 @@ use webxr_api::SelectEvent;
 use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session;
+use webxr_api::SessionBuilder;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::Space;
+use webxr_api::SubImages;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::ViewerPose;
@@ -52,7 +59,7 @@ use euclid::RigidTransform3D;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use surfman::Surface;
+use surfman_chains::SwapChains;
 
 pub struct HeadlessMockDiscovery {}
 
@@ -76,6 +83,8 @@ struct HeadlessDevice {
     id: u32,
     hit_tests: HitTestList,
     granted_features: Vec<String>,
+    grand_manager: LayerGrandManager<SurfmanGL>,
+    layer_manager: Option<LayerManager>,
 }
 
 struct PerSessionData {
@@ -100,12 +109,12 @@ struct HeadlessDeviceData {
     next_id: u32,
 }
 
-impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
+impl MockDiscoveryAPI<SurfmanGL> for HeadlessMockDiscovery {
     fn simulate_device_connection(
         &mut self,
         init: MockDeviceInit,
         receiver: Receiver<MockDeviceMsg>,
-    ) -> Result<Box<dyn DiscoveryAPI<SwapChains>>, Error> {
+    ) -> Result<Box<dyn DiscoveryAPI<SurfmanGL>>, Error> {
         let viewer_origin = init.viewer_origin.clone();
         let floor_transform = init.floor_origin.map(|f| f.inverse());
         let views = init.views.clone();
@@ -144,12 +153,12 @@ fn run_loop(receiver: Receiver<MockDeviceMsg>, data: Arc<Mutex<HeadlessDeviceDat
     }
 }
 
-impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
+impl DiscoveryAPI<SurfmanGL> for HeadlessDiscovery {
     fn request_session(
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder,
+        xr: SessionBuilder<SurfmanGL>,
     ) -> Result<Session, Error> {
         if !self.supports_session(mode) {
             return Err(Error::NoMatchingDevice);
@@ -169,13 +178,16 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
         d.sessions.push(per_session);
 
         let granted_features = init.validate(mode, &d.supported_features)?;
+        let layer_manager = None;
         drop(d);
-        xr.spawn(move || {
+        xr.spawn(move |grand_manager| {
             Ok(HeadlessDevice {
                 data,
                 id,
                 granted_features,
                 hit_tests: HitTestList::default(),
+                grand_manager,
+                layer_manager,
             })
         })
     }
@@ -220,9 +232,22 @@ impl HeadlessDevice {
             .find(|s| s.id == self.id)
             .unwrap())
     }
+
+    fn layer_manager(&mut self) -> Result<&mut LayerManager, Error> {
+        if let Some(ref mut manager) = self.layer_manager {
+            return Ok(manager);
+        }
+        let swap_chains = SwapChains::new();
+        let viewports = self.viewports();
+        let layer_manager = self.grand_manager.create_layer_manager(move |_, _| {
+            Ok(SurfmanLayerManager::new(viewports, swap_chains))
+        })?;
+        self.layer_manager = Some(layer_manager);
+        Ok(self.layer_manager.as_mut().unwrap())
+    }
 }
 
-impl DeviceAPI<Surface> for HeadlessDevice {
+impl DeviceAPI for HeadlessDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.data.lock().unwrap().floor_transform.clone()
     }
@@ -233,10 +258,23 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         d.viewports(per_session.mode)
     }
 
-    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
-        thread::sleep(std::time::Duration::from_millis(20));
+    fn create_layer(&mut self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error> {
+        self.layer_manager()?.create_layer(context_id, init)
+    }
+
+    fn destroy_layer(&mut self, context_id: ContextId, layer_id: LayerId) {
+        self.layer_manager()
+            .unwrap()
+            .destroy_layer(context_id, layer_id)
+    }
+
+    fn begin_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) -> Option<Frame> {
+        let sub_images = self.layer_manager().ok()?.begin_frame(layers).ok()?;
         let mut data = self.data.lock().unwrap();
-        let mut frame = data.get_frame(&data.sessions.iter().find(|s| s.id == self.id).unwrap());
+        let mut frame = data.get_frame(
+            data.sessions.iter().find(|s| s.id == self.id).unwrap(),
+            sub_images,
+        );
         let per_session = data.sessions.iter_mut().find(|s| s.id == self.id).unwrap();
         if per_session.needs_vp_update {
             per_session.needs_vp_update = false;
@@ -274,8 +312,9 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         Some(frame)
     }
 
-    fn render_animation_frame(&mut self, surface: Surface) -> Surface {
-        surface
+    fn end_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) {
+        let _ = self.layer_manager().unwrap().end_frame(layers);
+        thread::sleep(std::time::Duration::from_millis(20));
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -326,7 +365,7 @@ macro_rules! with_all_sessions {
 }
 
 impl HeadlessDeviceData {
-    fn get_frame(&self, s: &PerSessionData) -> Frame {
+    fn get_frame(&self, s: &PerSessionData, sub_images: Vec<SubImages>) -> Frame {
         let time_ns = time::precise_time_ns();
         let views = self.views.clone();
 
@@ -358,12 +397,12 @@ impl HeadlessDeviceData {
                 hand: None,
             })
             .collect();
-
         Frame {
             pose,
             inputs,
             events: vec![],
             time_ns,
+            sub_images,
             sent_time: 0,
             hit_test_results: vec![],
         }
@@ -383,7 +422,7 @@ impl HeadlessDeviceData {
 
     fn trigger_select(&mut self, id: InputId, kind: SelectKind, event: SelectEvent) {
         for i in 0..self.sessions.len() {
-            let frame = self.get_frame(&self.sessions[i]);
+            let frame = self.get_frame(&self.sessions[i], Vec::new());
             self.sessions[i]
                 .events
                 .callback(Event::Select(id, kind, event, frame));

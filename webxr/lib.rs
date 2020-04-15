@@ -28,14 +28,8 @@ mod egl;
 #[cfg(feature = "openxr-api")]
 pub mod openxr;
 
-/// A type synonym for swap chains
-pub type SwapChains = surfman_chains::SwapChains<webxr_api::SwapChainId, surfman::Device>;
-
-/// A type synonym for the main thread registry
-pub type MainThreadRegistry = webxr_api::MainThreadRegistry<SwapChains>;
-
-/// A type synonym for the session builder
-pub type SessionBuilder<'a> = webxr_api::SessionBuilder<'a, SwapChains>;
-
-/// A type synonym for discovery objects
-pub type Discovery = Box<dyn webxr_api::DiscoveryAPI<SwapChains>>;
+pub mod surfman_layer_manager;
+pub use surfman_layer_manager::SurfmanGL;
+pub use surfman_layer_manager::SurfmanLayerManager;
+pub type MainThreadRegistry = webxr_api::MainThreadRegistry<surfman_layer_manager::SurfmanGL>;
+pub type Discovery = Box<dyn webxr_api::DiscoveryAPI<SurfmanGL>>;
