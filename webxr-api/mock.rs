@@ -4,6 +4,7 @@
 
 use crate::DiscoveryAPI;
 use crate::Display;
+use crate::EntityType;
 use crate::Error;
 use crate::Floor;
 use crate::Handedness;
@@ -18,6 +19,7 @@ use crate::SelectEvent;
 use crate::SelectKind;
 use crate::Sender;
 use crate::TargetRayMode;
+use crate::Triangle;
 use crate::Viewer;
 use crate::Viewport;
 use crate::Visibility;
@@ -40,11 +42,13 @@ pub trait MockDiscoveryAPI<SwapChains>: 'static {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockDeviceInit {
     pub floor_origin: Option<RigidTransform3D<f32, Floor, Native>>,
-    pub supports_immersive: bool,
-    pub supports_unbounded: bool,
+    pub supports_inline: bool,
+    pub supports_vr: bool,
+    pub supports_ar: bool,
     pub viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     pub views: MockViewsInit,
     pub supported_features: Vec<String>,
+    pub world: Option<MockWorld>,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +77,8 @@ pub enum MockDeviceMsg {
     AddInputSource(MockInputInit),
     MessageInputSource(InputId, MockInputMsg),
     VisibilityChange(Visibility),
+    SetWorld(MockWorld),
+    ClearWorld,
     Disconnect(Sender<()>),
 }
 
@@ -98,4 +104,17 @@ pub enum MockInputMsg {
     TriggerSelect(SelectKind, SelectEvent),
     Disconnect,
     Reconnect,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct MockRegion {
+    pub faces: Vec<Triangle>,
+    pub ty: EntityType,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct MockWorld {
+    pub regions: Vec<MockRegion>,
 }

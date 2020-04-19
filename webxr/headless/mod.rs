@@ -5,7 +5,9 @@
 use crate::SessionBuilder;
 use crate::SwapChains;
 
-use webxr_api::util::{self, ClipPlanes};
+use webxr_api::util::{self, ClipPlanes, HitTestList};
+use webxr_api::ApiSpace;
+use webxr_api::BaseSpace;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Error;
@@ -14,6 +16,9 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
+use webxr_api::HitTestId;
+use webxr_api::HitTestResult;
+use webxr_api::HitTestSource;
 use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputSource;
@@ -23,14 +28,17 @@ use webxr_api::MockDiscoveryAPI;
 use webxr_api::MockInputMsg;
 use webxr_api::MockViewInit;
 use webxr_api::MockViewsInit;
+use webxr_api::MockWorld;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::Ray;
 use webxr_api::Receiver;
 use webxr_api::SelectEvent;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
+use webxr_api::Space;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Views;
@@ -46,7 +54,9 @@ pub struct HeadlessMockDiscovery {}
 
 struct HeadlessDiscovery {
     data: Arc<Mutex<HeadlessDeviceData>>,
-    supports_immersive: bool,
+    supports_vr: bool,
+    supports_inline: bool,
+    supports_ar: bool,
 }
 
 struct InputInfo {
@@ -61,6 +71,7 @@ struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
     mode: SessionMode,
     clip_planes: ClipPlanes,
+    hit_tests: HitTestList,
     granted_features: Vec<String>,
 }
 
@@ -75,6 +86,7 @@ struct HeadlessDeviceData {
     events: EventBuffer,
     quitter: Option<Quitter>,
     disconnected: bool,
+    world: Option<MockWorld>,
 }
 
 impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
@@ -97,6 +109,7 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
             events: Default::default(),
             quitter: None,
             disconnected: false,
+            world: init.world,
         };
         let data = Arc::new(Mutex::new(data));
         let data_ = data.clone();
@@ -106,7 +119,9 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
         });
         Ok(Box::new(HeadlessDiscovery {
             data,
-            supports_immersive: init.supports_immersive,
+            supports_vr: init.supports_vr,
+            supports_inline: init.supports_inline,
+            supports_ar: init.supports_ar,
         }))
     }
 }
@@ -138,13 +153,20 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
                 mode,
                 clip_planes,
                 granted_features,
+                hit_tests: HitTestList::default(),
             })
         })
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        (!self.data.lock().unwrap().disconnected)
-            && (mode == SessionMode::Inline || self.supports_immersive)
+        if self.data.lock().unwrap().disconnected {
+            return false;
+        }
+        match mode {
+            SessionMode::Inline => self.supports_inline,
+            SessionMode::ImmersiveVR => self.supports_vr,
+            SessionMode::ImmersiveAR => self.supports_ar,
+        }
     }
 }
 
@@ -185,12 +207,32 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         thread::sleep(std::time::Duration::from_millis(20));
         let mut data = self.data.lock().unwrap();
         let mut frame = data.get_frame();
+        let events = self.hit_tests.commit_tests();
+        frame.events = events;
         if data.needs_view_update {
             data.needs_view_update = false;
             frame
                 .events
                 .push(FrameUpdateEvent::UpdateViews(self.views()))
         };
+
+        if let Some(ref world) = data.world {
+            for source in self.hit_tests.tests() {
+                let ray = data.native_ray(source.ray, source.space);
+                let ray = if let Some(ray) = ray { ray } else { break };
+                let hits = world
+                    .regions
+                    .iter()
+                    .filter(|region| source.types.is_type(region.ty))
+                    .flat_map(|region| &region.faces)
+                    .filter_map(|triangle| triangle.intersect(ray))
+                    .map(|space| HitTestResult {
+                        space,
+                        id: source.id,
+                    });
+                frame.hit_test_results.extend(hits);
+            }
+        }
 
         if data.needs_floor_update {
             frame.events.push(FrameUpdateEvent::UpdateFloorTransform(
@@ -229,6 +271,14 @@ impl DeviceAPI<Surface> for HeadlessDevice {
     fn granted_features(&self) -> &[String] {
         &self.granted_features
     }
+
+    fn request_hit_test(&mut self, source: HitTestSource) {
+        self.hit_tests.request_hit_test(source)
+    }
+
+    fn cancel_hit_test(&mut self, id: HitTestId) {
+        self.hit_tests.cancel_hit_test(id)
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -260,11 +310,14 @@ impl HeadlessDeviceData {
             events: vec![],
             time_ns,
             sent_time: 0,
+            hit_test_results: vec![],
         }
     }
 
     fn handle_msg(&mut self, msg: MockDeviceMsg) -> bool {
         match msg {
+            MockDeviceMsg::SetWorld(w) => self.world = Some(w),
+            MockDeviceMsg::ClearWorld => self.world = None,
             MockDeviceMsg::SetViewerOrigin(viewer_origin) => {
                 self.viewer_origin = viewer_origin;
             }
@@ -376,5 +429,32 @@ impl HeadlessDeviceData {
             }
         }
         true
+    }
+
+    fn native_ray(&self, ray: Ray<ApiSpace>, space: Space) -> Option<Ray<Native>> {
+        let origin: RigidTransform3D<f32, ApiSpace, Native> = match space.base {
+            BaseSpace::Local => RigidTransform3D::identity(),
+            BaseSpace::Floor => self.floor_transform?.inverse().cast_unit(),
+            BaseSpace::Viewer => self.viewer_origin?.cast_unit(),
+            BaseSpace::TargetRay(id) => self
+                .inputs
+                .iter()
+                .find(|i| i.source.id == id)?
+                .pointer?
+                .cast_unit(),
+            BaseSpace::Grip(id) => self
+                .inputs
+                .iter()
+                .find(|i| i.source.id == id)?
+                .grip?
+                .cast_unit(),
+        };
+        let space_origin = origin.pre_transform(&space.offset);
+
+        let origin_rigid: RigidTransform3D<f32, ApiSpace, ApiSpace> = ray.origin.into();
+        Some(Ray {
+            origin: origin_rigid.post_transform(&space_origin).translation,
+            direction: space_origin.rotation.transform_vector3d(ray.direction),
+        })
     }
 }

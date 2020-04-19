@@ -786,6 +786,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             events,
             time_ns,
             sent_time: 0,
+            hit_test_results: vec![],
         };
 
         if let Some(right_select) = right.select {

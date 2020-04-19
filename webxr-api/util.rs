@@ -1,3 +1,6 @@
+use crate::FrameUpdateEvent;
+use crate::HitTestId;
+use crate::HitTestSource;
 use euclid::Transform3D;
 
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +37,38 @@ impl ClipPlanes {
         } else {
             false
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+/// Holds on to hit tests
+pub struct HitTestList {
+    tests: Vec<HitTestSource>,
+    uncommitted_tests: Vec<HitTestSource>,
+}
+
+impl HitTestList {
+    pub fn request_hit_test(&mut self, source: HitTestSource) {
+        self.uncommitted_tests.push(source)
+    }
+
+    pub fn commit_tests(&mut self) -> Vec<FrameUpdateEvent> {
+        let mut events = vec![];
+        for test in self.uncommitted_tests.drain(..) {
+            events.push(FrameUpdateEvent::HitTestSourceAdded(test.id));
+            self.tests.push(test);
+        }
+        events
+    }
+
+    pub fn tests(&self) -> &[HitTestSource] {
+        &self.tests
+    }
+
+    pub fn cancel_hit_test(&mut self, id: HitTestId) {
+        self.tests.retain(|s| s.id != id);
+        self.uncommitted_tests.retain(|s| s.id != id);
     }
 }
 
