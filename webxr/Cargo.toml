@@ -24,7 +24,7 @@ path = "lib.rs"
 angle = ["surfman/sm-angle"]
 egl = []
 gles = []
-glwindow = ["glutin"]
+glwindow = []
 headless = []
 ipc = ["webxr-api/ipc", "serde"]
 googlevr = ["gvr-sys", "android_injected_glue", "gles"]
@@ -37,7 +37,6 @@ webxr-api = { path = "../webxr-api" }
 crossbeam-channel = "0.4"
 euclid = "0.20.10"
 gleam = "0.9"
-glutin = { version = "0.21", optional = true }
 log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
 openxr = { version = "0.12.1", optional = true }
