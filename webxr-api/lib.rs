@@ -14,6 +14,7 @@ mod device;
 mod error;
 mod events;
 mod frame;
+mod hand;
 mod hittest;
 mod input;
 mod mock;
@@ -34,6 +35,11 @@ pub use events::Visibility;
 
 pub use frame::Frame;
 pub use frame::FrameUpdateEvent;
+
+pub use hand::Finger;
+pub use hand::Hand;
+pub use hand::HandSpace;
+pub use hand::Joint;
 
 pub use hittest::EntityType;
 pub use hittest::EntityTypes;
