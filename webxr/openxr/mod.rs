@@ -841,6 +841,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 // XXXManishearth update with whatever we decide
                 // in https://github.com/immersive-web/webxr-input-profiles/issues/105
                 profiles: vec!["generic-hand".into()],
+                supports_hand: false,
             },
             InputSource {
                 handedness: Handedness::Left,
@@ -848,6 +849,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 target_ray_mode: TargetRayMode::TrackedPointer,
                 supports_grip: true,
                 profiles: vec!["generic-hand".into()],
+                supports_hand: false,
             },
         ]
     }

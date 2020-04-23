@@ -301,6 +301,7 @@ impl HeadlessDeviceData {
                 grip_origin: i.grip,
                 pressed: false,
                 squeezed: false,
+                hand: None,
             })
             .collect();
 

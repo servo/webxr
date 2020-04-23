@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::Hand;
 use crate::Input;
 use crate::Native;
 
@@ -34,6 +35,7 @@ pub struct InputSource {
     pub target_ray_mode: TargetRayMode,
     pub id: InputId,
     pub supports_grip: bool,
+    pub supports_hand: bool,
     pub profiles: Vec<String>,
 }
 
@@ -44,6 +46,7 @@ pub struct InputFrame {
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub pressed: bool,
+    pub hand: Option<Box<Hand>>,
     pub squeezed: bool,
 }
 

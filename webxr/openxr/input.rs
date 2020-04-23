@@ -296,6 +296,7 @@ impl OpenXRInput {
             pressed: click_is_active && click.current_state,
             squeezed: squeeze_is_active && squeeze.current_state,
             grip_origin,
+            hand: None,
         };
 
         Frame {
