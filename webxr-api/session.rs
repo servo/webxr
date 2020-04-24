@@ -335,6 +335,8 @@ where
                         }
                         let surface = self.device.render_animation_frame(surface);
                         swap_chain.recycle_surface(surface);
+                    } else {
+                        warn!("no surface; not rendering");
                     }
                 }
                 #[cfg(feature = "profile")]

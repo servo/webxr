@@ -224,6 +224,7 @@ where
                 }
             }
         }
+        warn!("no device could support the session");
         Err(Error::NoMatchingDevice)
     }
 
