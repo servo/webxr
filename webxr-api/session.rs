@@ -79,6 +79,14 @@ impl SessionInit {
 
         Ok(granted)
     }
+
+    pub fn feature_requested(&self, f: &str) -> bool {
+        self.required_features
+            .iter()
+            .chain(self.optional_features.iter())
+            .find(|x| *x == f)
+            .is_some()
+    }
 }
 
 #[cfg(feature = "profile")]
