@@ -4,6 +4,7 @@
 
 use crate::Hand;
 use crate::Input;
+use crate::Joint;
 use crate::Native;
 
 use euclid::RigidTransform3D;
@@ -35,18 +36,18 @@ pub struct InputSource {
     pub target_ray_mode: TargetRayMode,
     pub id: InputId,
     pub supports_grip: bool,
-    pub supports_hand: bool,
+    pub hand_support: Option<Hand<()>>,
     pub profiles: Vec<String>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputFrame {
     pub id: InputId,
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub pressed: bool,
-    pub hand: Option<Box<Hand>>,
+    pub hand: Option<Box<Hand<Joint>>>,
     pub squeezed: bool,
 }
 

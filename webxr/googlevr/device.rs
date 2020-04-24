@@ -573,7 +573,7 @@ impl GoogleVRDevice {
                 grip_origin: None,
                 pressed: false,
                 squeezed: false,
-                hand: None
+                hand: None,
             }]
         } else {
             vec![]
@@ -642,7 +642,7 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
                 target_ray_mode: TargetRayMode::TrackedPointer,
                 supports_grip: false,
                 profiles: vec!["google-daydream".into(), "generic-touchpad".into()],
-                supports_hand: false,
+                hand_support: None,
             }]
         } else {
             vec![]
