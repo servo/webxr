@@ -17,10 +17,10 @@ use euclid::UnknownUnit;
 use euclid::Vector3D;
 
 use gleam::gl;
-use gleam::gl::GLsizei;
 use gleam::gl::GLuint;
 use gleam::gl::Gl;
 
+use std::ffi::c_void;
 use std::rc::Rc;
 
 use surfman::Adapter;
@@ -123,10 +123,10 @@ pub struct GlWindowDevice {
     context: Context,
     gl: Rc<dyn Gl>,
     window: Box<dyn GlWindow>,
-    read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
     granted_features: Vec<String>,
+    shader: GlWindowShader,
 }
 
 impl DeviceAPI<Surface> for GlWindowDevice {
@@ -179,53 +179,18 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         self.device.make_context_current(&self.context).unwrap();
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        let size = self.device.surface_info(&surface).size;
         let surface_texture = self
             .device
             .create_surface_texture(&mut self.context, surface)
             .unwrap();
         let texture_id = self.device.surface_texture_object(&surface_texture);
-
-        let width = size.width as GLsizei;
-        let height = size.height as GLsizei;
-        let inner_size = self
-            .device
-            .context_surface_info(&self.context)
-            .unwrap()
-            .unwrap()
-            .size;
+        let texture_target = self.device.surface_gl_texture_target();
 
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        self.gl
-            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        self.gl.framebuffer_texture_2d(
-            gl::READ_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            self.device.surface_gl_texture_target(),
-            texture_id,
-            0,
-        );
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        self.gl.viewport(0, 0, width, height);
-
-        self.gl.blit_framebuffer(
-            0,
-            0,
-            width,
-            height,
-            0,
-            0,
-            inner_size.width,
-            inner_size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::NEAREST,
-        );
+        self.shader.draw_texture(texture_id, texture_target);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
         self.device
@@ -295,9 +260,6 @@ impl GlWindowDevice {
                 gl::GlesFns::load_with(|s| device.get_proc_address(&context, s))
             },
         };
-        let read_fbo = gl.gen_framebuffers(1)[0];
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-
         let framebuffer_object = device
             .context_surface_info(&context)
             .unwrap()
@@ -312,15 +274,18 @@ impl GlWindowDevice {
             (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
         );
 
+        let shader = GlWindowShader::new(gl.clone());
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
         Ok(GlWindowDevice {
             gl,
             window,
             device,
             context,
-            read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),
             granted_features,
+            shader,
         })
     }
 
@@ -353,7 +318,7 @@ impl GlWindowDevice {
     fn perspective<Eye>(&self) -> Transform3D<f32, Eye, Display> {
         let near = self.clip_planes.near;
         let far = self.clip_planes.far;
-        // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
+        // https://gith<ub.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
         let size = self
             .device
             .context_surface_info(&self.context)
@@ -378,5 +343,130 @@ impl GlWindowDevice {
                 0.0,        0.0, 2.0 * far * near * nf, 0.0,
             );
         }
+    }
+}
+
+struct GlWindowShader {
+    gl: Rc<dyn Gl>,
+    buffer: GLuint,
+    vao: GLuint,
+    program: GLuint,
+}
+
+const VERTEX_ATTRIBUTE: GLuint = 0;
+const VERTICES: &[[f32; 2]; 4] = &[[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]];
+const VERTEX_SHADER: &[u8] = b"
+  #version 330 core
+  layout(location=0) in vec2 coord;
+  out vec2 vTexCoord;
+  void main(void) {
+    gl_Position = vec4(coord, 0.0, 1.0);
+    vTexCoord = coord * 0.5 + 0.5;
+  }
+";
+
+const FRAGMENT_SHADER: &[u8] = b"
+  #version 330 core
+  layout(location=0) out vec4 color;
+  uniform sampler2D image;
+  in vec2 vTexCoord;
+  void main() {
+    color = texture(image, vTexCoord);
+  }
+";
+
+impl GlWindowShader {
+    fn new(gl: Rc<dyn Gl>) -> GlWindowShader {
+        // The four corners of the window in a VAO, set to attribute 0
+        let buffer = gl.gen_buffers(1)[0];
+        let vao = gl.gen_vertex_arrays(1)[0];
+        gl.bind_buffer(gl::ARRAY_BUFFER, buffer);
+        gl.buffer_data_untyped(
+            gl::ARRAY_BUFFER,
+            std::mem::size_of_val(VERTICES) as isize,
+            VERTICES as *const _ as *const c_void,
+            gl::STATIC_DRAW,
+        );
+        gl.bind_vertex_array(vao);
+        gl.vertex_attrib_pointer(
+            VERTEX_ATTRIBUTE,
+            VERTICES[0].len() as i32,
+            gl::FLOAT,
+            false,
+            0,
+            0,
+        );
+        gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        // The shader program
+        let program = gl.create_program();
+        let vertex_shader = gl.create_shader(gl::VERTEX_SHADER);
+        let fragment_shader = gl.create_shader(gl::FRAGMENT_SHADER);
+        gl.shader_source(vertex_shader, &[VERTEX_SHADER]);
+        gl.compile_shader(vertex_shader);
+        gl.attach_shader(program, vertex_shader);
+        gl.shader_source(fragment_shader, &[FRAGMENT_SHADER]);
+        gl.compile_shader(fragment_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        // Check for errors
+        // TODO: something other than panic?
+        let mut status = [0];
+        unsafe { gl.get_shader_iv(vertex_shader, gl::COMPILE_STATUS, &mut status) };
+        assert_eq!(
+            status[0],
+            gl::TRUE as i32,
+            "Failed to compile vertex shader: {}",
+            gl.get_shader_info_log(vertex_shader)
+        );
+        unsafe { gl.get_shader_iv(fragment_shader, gl::COMPILE_STATUS, &mut status) };
+        assert_eq!(
+            status[0],
+            gl::TRUE as i32,
+            "Failed to compile fragment shader: {}",
+            gl.get_shader_info_log(fragment_shader)
+        );
+        unsafe { gl.get_program_iv(program, gl::LINK_STATUS, &mut status) };
+        assert_eq!(
+            status[0],
+            gl::TRUE as i32,
+            "Failed to link: {}",
+            gl.get_program_info_log(program)
+        );
+
+        // Clean up
+        gl.delete_shader(vertex_shader);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+        gl.delete_shader(fragment_shader);
+        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+        // And we're done
+        GlWindowShader {
+            gl,
+            buffer,
+            vao,
+            program,
+        }
+    }
+
+    fn draw_texture(&self, texture_id: GLuint, texture_target: GLuint) {
+        self.gl.use_program(self.program);
+        self.gl.bind_vertex_array(self.vao);
+        self.gl.active_texture(gl::TEXTURE0);
+        self.gl.bind_texture(texture_target, texture_id);
+        self.gl
+            .draw_arrays(gl::TRIANGLE_STRIP, 0, VERTICES.len() as i32);
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+    }
+}
+
+impl Drop for GlWindowShader {
+    fn drop(&mut self) {
+        self.gl.delete_buffers(&[self.buffer]);
+        self.gl.delete_vertex_arrays(&[self.vao]);
+        self.gl.delete_program(self.program);
     }
 }
