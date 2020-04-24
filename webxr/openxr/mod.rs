@@ -121,14 +121,18 @@ impl OpenXrDiscovery {
     }
 }
 
-pub fn create_instance() -> Result<Instance, String> {
-    let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
+struct CreatedInstance {
+    instance: Instance,
+    supports_hands: bool,
+}
 
-    let extensions = entry
+fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
+    let entry = Entry::load().map_err(|e| format!("{:?}", e))?;
+    let supported = entry
         .enumerate_extensions()
-        .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
-    warn!("Available extensions:\n{:?}", extensions);
-
+        .map_err(|e| format!("{:?}", e))?;
+    warn!("Available extensions:\n{:?}", supported);
+    let supports_hands = needs_hands && supported.msft_hand_tracking_preview;
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -138,10 +142,18 @@ pub fn create_instance() -> Result<Instance, String> {
 
     let mut exts = ExtensionSet::default();
     exts.khr_d3d11_enable = true;
+    if supports_hands {
+        exts.msft_hand_tracking_preview = true;
+    }
 
-    entry
+    let instance = entry
         .create_instance(&app_info, &exts)
-        .map_err(|e| format!("Entry::create_instance {:?}", e))
+        .map_err(|e| format!("Entry::create_instance {:?}", e))?;
+
+    Ok(CreatedInstance {
+        instance,
+        supports_hands,
+    })
 }
 
 fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
@@ -169,13 +181,15 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
         init: &SessionInit,
         xr: SessionBuilder,
     ) -> Result<WebXrSession, Error> {
-        let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
         if self.supports_session(mode) {
             let gl_thread = self.gl_thread.clone();
             let provider_registration = self.provider_registration.clone();
-            let granted_features = init.validate(mode, &["local-floor".into()])?;
+            let granted_features =
+                init.validate(mode, &["hand-tracking".into(), "local-floor".into()])?;
+            let needs_hands = granted_features.contains(&"hand-tracking".into());
             let id = xr.id();
             let context_menu_provider = self.context_menu_provider.clone_object();
+            let instance = create_instance(needs_hands).map_err(|e| Error::BackendSpecific(e))?;
             xr.spawn(move || {
                 OpenXrDevice::new(
                     gl_thread,
@@ -414,11 +428,14 @@ impl OpenXrDevice {
     fn new(
         gl_thread: Box<dyn GlThread>,
         provider_registration: Box<dyn SurfaceProviderRegistration>,
-        instance: Instance,
+        instance: CreatedInstance,
         granted_features: Vec<String>,
         id: SessionId,
         context_menu_provider: Box<dyn ContextMenuProvider>,
     ) -> Result<OpenXrDevice, Error> {
+        let supports_hands = instance.supports_hands;
+        let instance = instance.instance;
+
         let (device_tx, device_rx) = crossbeam_channel::unbounded();
         let (provider_tx, provider_rx) = crossbeam_channel::unbounded();
         let _ = gl_thread.execute(Box::new(move |device| {
