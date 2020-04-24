@@ -33,7 +33,6 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
-use webxr_api::Handedness;
 use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
@@ -44,7 +43,6 @@ use webxr_api::Session as WebXrSession;
 use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
-use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Views;
 use webxr_api::Visibility;
@@ -611,7 +609,8 @@ impl OpenXrDevice {
 
         // input
 
-        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session, supports_hands);
+        let (action_set, right_hand, left_hand) =
+            OpenXRInput::setup_inputs(&instance, &session, supports_hands);
 
         Ok(OpenXrDevice {
             instance,
@@ -924,24 +923,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
     fn initial_inputs(&self) -> Vec<InputSource> {
         vec![
-            InputSource {
-                handedness: Handedness::Right,
-                id: InputId(0),
-                target_ray_mode: TargetRayMode::TrackedPointer,
-                supports_grip: true,
-                // XXXManishearth update with whatever we decide
-                // in https://github.com/immersive-web/webxr-input-profiles/issues/105
-                profiles: vec!["generic-hand".into()],
-                hand_support: None,
-            },
-            InputSource {
-                handedness: Handedness::Left,
-                id: InputId(1),
-                target_ray_mode: TargetRayMode::TrackedPointer,
-                supports_grip: true,
-                profiles: vec!["generic-hand".into()],
-                hand_support: None,
-            },
+            self.right_hand.input_source(),
+            self.left_hand.input_source(),
         ]
     }
 
