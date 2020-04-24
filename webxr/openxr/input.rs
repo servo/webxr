@@ -2,7 +2,7 @@ use euclid::RigidTransform3D;
 use openxr::d3d::D3D11;
 use openxr::{
     self, Action, ActionSet, Binding, FrameState, Instance, Path, Posef, Quaternionf, Session,
-    Space, SpaceLocationFlags, Vector3f,
+    Space, SpaceLocationFlags, Vector3f, HandTracker, Hand
 };
 use webxr_api::Handedness;
 use webxr_api::Input;
@@ -92,6 +92,7 @@ pub struct OpenXRInput {
     click_state: ClickState,
     squeeze_state: ClickState,
     menu_gesture_sustain: u8,
+    hand_tracker: Option<HandTracker>,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -108,6 +109,7 @@ impl OpenXRInput {
         handedness: Handedness,
         action_set: &ActionSet,
         session: &Session<D3D11>,
+        needs_hands: bool,
     ) -> Self {
         let hand = hand_str(handedness);
         let action_aim_pose: Action<Posef> = action_set
@@ -144,6 +146,19 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
+
+        let hand_tracker = if needs_hands {
+            let hand = match handedness {
+                Handedness::Left => Hand::LEFT,
+                Handedness::Right => Hand::RIGHT,
+                _ => panic!("We don't support unknown handedness in openxr")
+            };
+            Some(session.create_hand_tracker(hand).unwrap())
+        } else {
+            None
+        };
+
+
         Self {
             id,
             action_aim_pose,
@@ -156,13 +171,14 @@ impl OpenXRInput {
             click_state: ClickState::Done,
             squeeze_state: ClickState::Done,
             menu_gesture_sustain: 0,
+            hand_tracker,
         }
     }
 
-    pub fn setup_inputs(instance: &Instance, session: &Session<D3D11>) -> (ActionSet, Self, Self) {
+    pub fn setup_inputs(instance: &Instance, session: &Session<D3D11>, needs_hands: bool) -> (ActionSet, Self, Self) {
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
-        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
-        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
+        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session, needs_hands);
+        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session, needs_hands);
 
         let mut bindings =
             right_hand.get_bindings(instance, "trigger/value", Some("squeeze/click"));

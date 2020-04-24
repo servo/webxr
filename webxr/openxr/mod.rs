@@ -611,7 +611,7 @@ impl OpenXrDevice {
 
         // input
 
-        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session);
+        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session, supports_hands);
 
         Ok(OpenXrDevice {
             instance,
