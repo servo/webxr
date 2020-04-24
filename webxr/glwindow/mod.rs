@@ -358,10 +358,10 @@ const VERTICES: &[[f32; 2]; 4] = &[[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0,
 const VERTEX_SHADER: &[u8] = b"
   #version 330 core
   layout(location=0) in vec2 coord;
+  out vec2 vTexCoord;
   void main(void) {
-    gl_Position.xy = coord;
-    gl_Position.z = 0.0;
-    gl_Position.w = 1.0;
+    gl_Position = vec4(coord, 0.0, 1.0);
+    vTexCoord = coord * 0.5 + 0.5;
   }
 ";
 
@@ -369,10 +369,9 @@ const FRAGMENT_SHADER: &[u8] = b"
   #version 330 core
   layout(location=0) out vec4 color;
   uniform sampler2D image;
+  in vec2 vTexCoord;
   void main() {
-    ivec2 size = textureSize(image, 0);
-    vec2 position = vec2(gl_FragCoord.x / size.x, gl_FragCoord.y / size.y);
-    color = texture(image, position);
+    color = texture(image, vTexCoord);
   }
 ";
 
