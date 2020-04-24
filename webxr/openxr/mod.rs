@@ -8,7 +8,7 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
-use log::warn;
+use log::{error, warn};
 use openxr::d3d::{SessionCreateInfo, D3D11};
 use openxr::Graphics;
 use openxr::{
@@ -121,8 +121,14 @@ impl OpenXrDiscovery {
     }
 }
 
-fn create_instance() -> Result<Instance, String> {
-    let entry = Entry::load().map_err(|e| format!("{:?}", e))?;
+pub fn create_instance() -> Result<Instance, String> {
+    let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
+
+    let extensions = entry
+        .enumerate_extensions()
+        .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
+    warn!("Available extensions:\n{:?}", extensions);
+
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -135,7 +141,7 @@ fn create_instance() -> Result<Instance, String> {
 
     entry
         .create_instance(&app_info, &exts)
-        .map_err(|e| format!("{:?}", e))
+        .map_err(|e| format!("Entry::create_instance {:?}", e))
 }
 
 fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
@@ -242,7 +248,9 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
         // in preparation for displaying it.
         let mut data = self.shared_data.lock().unwrap();
         let data = &mut *data;
-        self.swapchain.release_image().unwrap();
+        if let Err(e) = self.swapchain.release_image() {
+            error!("Error releasing swapchain image: {:?}", e);
+        }
 
         // Invert the up/down angles so that openxr flips the texture in the y axis.
         let mut l_fov = data.openxr_views[0].fov;
@@ -285,13 +293,13 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
             .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
             .views(&views[..])];
 
-        data.frame_stream
-            .end(
-                data.frame_state.as_ref().unwrap().predicted_display_time,
-                self.blend_mode,
-                &layers[..],
-            )
-            .unwrap();
+        if let Err(e) = data.frame_stream.end(
+            data.frame_state.as_ref().unwrap().predicted_display_time,
+            self.blend_mode,
+            &layers[..],
+        ) {
+            error!("Error ending frame: {:?}", e);
+        }
     }
 
     fn recycle_surface(&mut self, surface: Surface) {
@@ -305,10 +313,16 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
         context: &mut surfman::Context,
         size: euclid::default::Size2D<i32>,
     ) -> Result<Surface, surfman::Error> {
-        let image = self.swapchain.acquire_image().unwrap();
+        let image = self.swapchain.acquire_image().map_err(|e| {
+            error!("Error acquiring swapchain image: {:?}", e);
+            surfman::Error::Failed
+        })?;
         self.swapchain
             .wait_image(openxr::Duration::INFINITE)
-            .unwrap();
+            .map_err(|e| {
+                error!("Error waiting on swapchain image: {:?}", e);
+                surfman::Error::Failed
+            })?;
 
         // Store the current image index that was acquired in the queue of
         // surfaces that have been handed out.
@@ -422,7 +436,7 @@ impl OpenXrDevice {
 
         let system = instance
             .system(FormFactor::HEAD_MOUNTED_DISPLAY)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| Error::BackendSpecific(format!("Instance::system {:?}", e)))?;
 
         // FIXME: we should be using these graphics requirements to drive the actual
         //        d3d device creation, rather than assuming the device that surfman
@@ -430,7 +444,7 @@ impl OpenXrDevice {
         //        unless we call this method, so we call it and ignore the results
         //        in the short term.
         let _requirements = D3D11::requirements(&instance, system)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| Error::BackendSpecific(format!("D3D11::requirements {:?}", e)))?;
 
         let (session, frame_waiter, frame_stream) = unsafe {
             instance
@@ -440,14 +454,14 @@ impl OpenXrDevice {
                         device: device as *mut _,
                     },
                 )
-                .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?
+                .map_err(|e| Error::BackendSpecific(format!("Instance::create_session {:?}", e)))?
         };
 
         // XXXPaul initialisation should happen on SessionStateChanged(Ready)?
 
         session
             .begin(ViewConfigurationType::PRIMARY_STEREO)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| Error::BackendSpecific(format!("Session::begin {:?}", e)))?;
 
         let pose = Posef {
             orientation: Quaternionf {
@@ -464,20 +478,34 @@ impl OpenXrDevice {
         };
         let space = session
             .create_reference_space(ReferenceSpaceType::LOCAL, pose)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| {
+                Error::BackendSpecific(format!("Session::create_reference_space {:?}", e))
+            })?;
 
         let viewer_space = session
             .create_reference_space(ReferenceSpaceType::VIEW, pose)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| {
+                Error::BackendSpecific(format!("Session::create_reference_space {:?}", e))
+            })?;
 
         let view_configuration_type = ViewConfigurationType::PRIMARY_STEREO;
         let view_configurations = instance
             .enumerate_view_configuration_views(system, view_configuration_type)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| {
+                Error::BackendSpecific(format!(
+                    "Session::enumerate_view_configuration_views {:?}",
+                    e
+                ))
+            })?;
 
         let blend_mode = instance
             .enumerate_environment_blend_modes(system, view_configuration_type)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?[0];
+            .map_err(|e| {
+                Error::BackendSpecific(format!(
+                    "Instance::enumerate_environment_blend_modes {:?}",
+                    e
+                ))
+            })?[0];
 
         let left_view_configuration = view_configurations[0];
         let right_view_configuration = view_configurations[1];
@@ -493,9 +521,9 @@ impl OpenXrDevice {
         // Create swapchains
 
         // XXXManishearth should we be doing this, or letting Servo set the format?
-        let formats = session
-            .enumerate_swapchain_formats()
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+        let formats = session.enumerate_swapchain_formats().map_err(|e| {
+            Error::BackendSpecific(format!("Session::enumerate_swapchain_formats {:?}", e))
+        })?;
         let format = pick_format(&formats);
         assert_eq!(
             left_view_configuration.recommended_image_rect_height,
@@ -516,10 +544,10 @@ impl OpenXrDevice {
 
         let swapchain = session
             .create_swapchain(&swapchain_create_info)
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| Error::BackendSpecific(format!("Session::create_swapchain {:?}", e)))?;
         let images = swapchain
             .enumerate_images()
-            .map_err(|e| Error::BackendSpecific(format!("{:?}", e)))?;
+            .map_err(|e| Error::BackendSpecific(format!("Session::enumerate_images {:?}", e)))?;
 
         let mut surfaces = Vec::with_capacity(images.len());
         for _ in 0..images.len() {
@@ -578,7 +606,13 @@ impl OpenXrDevice {
         let mut stopped = false;
         loop {
             let mut buffer = openxr::EventDataBuffer::new();
-            let event = self.instance.poll_event(&mut buffer).unwrap();
+            let event = match self.instance.poll_event(&mut buffer) {
+                Ok(event) => event,
+                Err(e) => {
+                    error!("Error polling events: {:?}", e);
+                    return false;
+                }
+            };
             match event {
                 Some(SessionStateChanged(session_change)) => match session_change.state() {
                     openxr::SessionState::EXITING | openxr::SessionState::LOSS_PENDING => {
@@ -588,17 +622,17 @@ impl OpenXrDevice {
                     openxr::SessionState::STOPPING => {
                         self.events
                             .callback(Event::VisibilityChange(Visibility::Hidden));
-                        self.session
-                            .end()
-                            .expect("Session failed to end on STOPPING");
+                        if let Err(e) = self.session.end() {
+                            error!("Session failed to end on STOPPING: {:?}", e);
+                        }
                         stopped = true;
                     }
                     openxr::SessionState::READY if stopped => {
                         self.events
                             .callback(Event::VisibilityChange(Visibility::Visible));
-                        self.session
-                            .begin(ViewConfigurationType::PRIMARY_STEREO)
-                            .expect("Session failed to begin on READY");
+                        if let Err(e) = self.session.begin(ViewConfigurationType::PRIMARY_STEREO) {
+                            error!("Session failed to begin on READY: {:?}", e);
+                        }
                         stopped = false;
                     }
                     openxr::SessionState::FOCUSED => {
@@ -661,32 +695,37 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             ),
         );
 
+        let default_views = Views::Stereo(
+            View {
+                viewport: left_vp,
+                ..Default::default()
+            },
+            View {
+                viewport: right_vp,
+                ..Default::default()
+            },
+        );
+
         let data = self.shared_data.lock().unwrap();
         let frame_state = if let Some(ref fs) = data.frame_state {
             fs
         } else {
             // This data isn't accessed till the first frame, so it
             // doesn't really matter what it is right now
-            return Views::Stereo(
-                View {
-                    viewport: left_vp,
-                    ..Default::default()
-                },
-                View {
-                    viewport: right_vp,
-                    ..Default::default()
-                },
-            );
+            return default_views;
         };
 
-        let (_view_flags, views) = self
-            .session
-            .locate_views(
-                ViewConfigurationType::PRIMARY_STEREO,
-                frame_state.predicted_display_time,
-                &self.viewer_space,
-            )
-            .expect("error locating views");
+        let (_view_flags, views) = match self.session.locate_views(
+            ViewConfigurationType::PRIMARY_STEREO,
+            frame_state.predicted_display_time,
+            &self.viewer_space,
+        ) {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Error locating views: {:?}", e);
+                return default_views;
+            }
+        };
         let left_view = View {
             transform: transform(&views[0].pose).inverse(),
             projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
@@ -703,6 +742,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         if !self.handle_openxr_events() {
+            warn!("no frame, session isn't running");
             // Session is not running anymore.
             return None;
         }
@@ -719,33 +759,52 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
         let mut data = self.shared_data.lock().unwrap();
         let needs_view_update = data.frame_state.is_none();
-        let frame_state = self.frame_waiter.wait().expect("error waiting for frame");
+        let frame_state = match self.frame_waiter.wait() {
+            Ok(frame_state) => frame_state,
+            Err(e) => {
+                error!("Error waiting on frame: {:?}", e);
+                return None;
+            }
+        };
 
         let time_ns = time::precise_time_ns();
 
-        data.frame_stream
-            .begin()
-            .expect("failed to start frame stream");
+        if let Err(e) = data.frame_stream.begin() {
+            error!("Error beginning frame stream: {:?}", e);
+            return None;
+        }
 
         // XXXManishearth should we check frame_state.should_render?
-        let (_view_flags, views) = self
-            .session
-            .locate_views(
-                ViewConfigurationType::PRIMARY_STEREO,
-                frame_state.predicted_display_time,
-                &data.space,
-            )
-            .expect("error locating views");
+        let (_view_flags, views) = match self.session.locate_views(
+            ViewConfigurationType::PRIMARY_STEREO,
+            frame_state.predicted_display_time,
+            &data.space,
+        ) {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Error locating views: {:?}", e);
+                return None;
+            }
+        };
         data.openxr_views = views;
-        let pose = self
+        let pose = match self
             .viewer_space
             .locate(&data.space, frame_state.predicted_display_time)
-            .unwrap();
+        {
+            Ok(pose) => pose,
+            Err(e) => {
+                error!("Error locating viewer space: {:?}", e);
+                return None;
+            }
+        };
         let transform = transform(&pose.pose);
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
-        self.session.sync_actions(&[active_action_set]).unwrap();
+        if let Err(e) = self.session.sync_actions(&[active_action_set]) {
+            error!("Error syncing actions: {:?}", e);
+            return None;
+        }
 
         let mut right = self
             .right_hand
@@ -860,18 +919,23 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         self.session.request_exit().unwrap();
         loop {
             let mut buffer = openxr::EventDataBuffer::new();
-            let event = self.instance.poll_event(&mut buffer).unwrap();
+            let event = match self.instance.poll_event(&mut buffer) {
+                Ok(e) => e,
+                Err(e) => {
+                    error!("Error polling for event while quitting: {:?}", e);
+                    break;
+                }
+            };
             match event {
                 Some(openxr::Event::SessionStateChanged(session_change)) => {
                     match session_change.state() {
                         openxr::SessionState::EXITING => {
-                            self.events.callback(Event::SessionEnd);
                             break;
                         }
                         openxr::SessionState::STOPPING => {
-                            self.session
-                                .end()
-                                .expect("Session failed to end on STOPPING");
+                            if let Err(e) = self.session.end() {
+                                error!("Session failed to end while STOPPING: {:?}", e);
+                            }
                         }
                         _ => (),
                     }
@@ -880,6 +944,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             }
             thread::sleep(Duration::from_millis(30));
         }
+        self.events.callback(Event::SessionEnd);
     }
 
     fn set_quitter(&mut self, _: Quitter) {
