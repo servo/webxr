@@ -1,4 +1,5 @@
 use crate::InputId;
+use crate::Joint;
 use euclid::RigidTransform3D;
 
 #[derive(Clone, Copy, Debug)]
@@ -15,6 +16,7 @@ pub enum BaseSpace {
     Viewer,
     TargetRay(InputId),
     Grip(InputId),
+    Joint(InputId, Joint)
 }
 
 #[derive(Clone, Copy, Debug)]

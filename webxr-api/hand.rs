@@ -31,12 +31,12 @@ pub struct Finger<J> {
 
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
-pub struct Joint {
+pub struct JointFrame {
     pub pose: RigidTransform3D<f32, HandSpace, Native>,
     pub radius: f32,
 }
 
-impl Default for Joint {
+impl Default for JointFrame {
     fn default() -> Self {
         Self {
             pose: RigidTransform3D::identity(),
@@ -46,29 +46,77 @@ impl Default for Joint {
 }
 
 impl<J> Hand<J> {
-    pub fn map<R>(&self, mut map: impl (FnMut(&Option<J>) -> Option<R>) + Copy) -> Hand<R> {
+    pub fn map<R>(&self, map: impl (Fn(&Option<J>, Joint) -> Option<R>) + Copy) -> Hand<R> {
         Hand {
-            wrist: map(&self.wrist),
-            thumb_metacarpal: map(&self.thumb_metacarpal),
-            thumb_phalanx_proximal: map(&self.thumb_phalanx_proximal),
-            thumb_phalanx_distal: map(&self.thumb_phalanx_distal),
-            thumb_phalanx_tip: map(&self.thumb_phalanx_tip),
-            index: self.index.map(map),
-            middle: self.middle.map(map),
-            ring: self.ring.map(map),
-            little: self.little.map(map),
+            wrist: map(&self.wrist, Joint::Wrist),
+            thumb_metacarpal: map(&self.thumb_metacarpal, Joint::ThumbMetacarpal),
+            thumb_phalanx_proximal: map(&self.thumb_phalanx_proximal, Joint::ThumbPhalanxProximal),
+            thumb_phalanx_distal: map(&self.thumb_phalanx_distal, Joint::ThumbPhalanxDistal),
+            thumb_phalanx_tip: map(&self.thumb_phalanx_tip, Joint::ThumbPhalanxTip),
+            index: self.index.map(|f, j| map(f, Joint::Index(j))),
+            middle: self.middle.map(|f, j| map(f, Joint::Middle(j))),
+            ring: self.ring.map(|f, j| map(f, Joint::Ring(j))),
+            little: self.little.map(|f, j| map(f, Joint::Little(j))),
+        }
+    }
+
+    pub fn get(&self, joint: Joint) -> Option<&J> {
+        match joint {
+            Joint::Wrist => self.wrist.as_ref(),
+            Joint::ThumbMetacarpal => self.thumb_metacarpal.as_ref(),
+            Joint::ThumbPhalanxProximal => self.thumb_phalanx_proximal.as_ref(),
+            Joint::ThumbPhalanxDistal => self.thumb_phalanx_distal.as_ref(),
+            Joint::ThumbPhalanxTip => self.thumb_phalanx_tip.as_ref(),
+            Joint::Index(f) => self.index.get(f),
+            Joint::Middle(f) => self.middle.get(f),
+            Joint::Ring(f) => self.ring.get(f),
+            Joint::Little(f) => self.little.get(f),
         }
     }
 }
 
 impl<J> Finger<J> {
-    pub fn map<R>(&self, mut map: impl (FnMut(&Option<J>) -> Option<R>) + Copy) -> Finger<R> {
+    pub fn map<R>(&self, map: impl (Fn(&Option<J>, FingerJoint) -> Option<R>) + Copy) -> Finger<R> {
         Finger {
-            metacarpal: map(&self.metacarpal),
-            phalanx_proximal: map(&self.phalanx_proximal),
-            phalanx_intermediate: map(&self.phalanx_intermediate),
-            phalanx_distal: map(&self.phalanx_distal),
-            phalanx_tip: map(&self.phalanx_tip),
+            metacarpal: map(&self.metacarpal, FingerJoint::Metacarpal),
+            phalanx_proximal: map(&self.phalanx_proximal, FingerJoint::PhalanxProximal),
+            phalanx_intermediate: map(&self.phalanx_intermediate, FingerJoint::PhalanxIntermediate),
+            phalanx_distal: map(&self.phalanx_distal, FingerJoint::PhalanxDistal),
+            phalanx_tip: map(&self.phalanx_tip, FingerJoint::PhalanxTip),
         }
     }
+
+    pub fn get(&self, joint: FingerJoint) -> Option<&J> {
+        match joint {
+            FingerJoint::Metacarpal => self.metacarpal.as_ref(),
+            FingerJoint::PhalanxProximal => self.phalanx_proximal.as_ref(),
+            FingerJoint::PhalanxIntermediate => self.phalanx_intermediate.as_ref(),
+            FingerJoint::PhalanxDistal => self.phalanx_distal.as_ref(),
+            FingerJoint::PhalanxTip => self.phalanx_tip.as_ref(),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum FingerJoint {
+    Metacarpal,
+    PhalanxProximal,
+    PhalanxIntermediate,
+    PhalanxDistal,
+    PhalanxTip,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub enum Joint {
+    Wrist,
+    ThumbMetacarpal,
+    ThumbPhalanxProximal,
+    ThumbPhalanxDistal,
+    ThumbPhalanxTip,
+    Index(FingerJoint),
+    Middle(FingerJoint),
+    Ring(FingerJoint),
+    Little(FingerJoint),
 }

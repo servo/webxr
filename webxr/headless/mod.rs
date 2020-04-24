@@ -449,6 +449,7 @@ impl HeadlessDeviceData {
                 .find(|i| i.source.id == id)?
                 .grip?
                 .cast_unit(),
+            BaseSpace::Joint(..) => panic!("Cannot request mocking backend with hands"),
         };
         let space_origin = origin.pre_transform(&space.offset);
 

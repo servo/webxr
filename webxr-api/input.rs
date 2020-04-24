@@ -4,7 +4,7 @@
 
 use crate::Hand;
 use crate::Input;
-use crate::Joint;
+use crate::JointFrame;
 use crate::Native;
 
 use euclid::RigidTransform3D;
@@ -47,7 +47,7 @@ pub struct InputFrame {
     pub target_ray_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub pressed: bool,
-    pub hand: Option<Box<Hand<Joint>>>,
+    pub hand: Option<Box<Hand<JointFrame>>>,
     pub squeezed: bool,
 }
 
