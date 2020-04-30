@@ -172,6 +172,13 @@ impl DeviceAPI<Surface> for GlWindowDevice {
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
+        debug_assert_eq!(
+            (
+                self.gl.get_error(),
+                self.gl.check_frame_buffer_status(gl::FRAMEBUFFER)
+            ),
+            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+        );
         let mut surface = self
             .device
             .unbind_surface_from_context(&mut self.context)
@@ -183,6 +190,19 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         self.device
             .bind_surface_to_context(&mut self.context, surface)
             .unwrap();
+        let framebuffer_object = self.device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .map(|info| info.framebuffer_object)
+            .unwrap_or(0);
+        self.gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
+        debug_assert_eq!(
+            (
+                self.gl.get_error(),
+                self.gl.check_frame_buffer_status(gl::FRAMEBUFFER)
+            ),
+            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+        );
         let time_ns = time::precise_time_ns();
         let translation = Vector3D::from_untyped(self.window.get_translation());
         let translation: RigidTransform3D<_, _, Native> =
