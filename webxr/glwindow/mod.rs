@@ -74,12 +74,13 @@ pub trait GlWindow {
     fn get_translation(&self) -> Vector3D<f32, UnknownUnit>;
 
     fn get_mode(&self) -> GlWindowMode {
-        GlWindowMode::StereoLeftRight
+        GlWindowMode::Blit
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum GlWindowMode {
+    Blit,
     StereoLeftRight,
     StereoRedCyan,
 }
@@ -87,7 +88,7 @@ pub enum GlWindowMode {
 impl GlWindowMode {
     fn is_anaglyph(&self) -> bool {
         match self {
-            GlWindowMode::StereoLeftRight => false,
+            GlWindowMode::Blit | GlWindowMode::StereoLeftRight => false,
             GlWindowMode::StereoRedCyan => true,
         }
     }
@@ -153,10 +154,11 @@ pub struct GlWindowDevice {
     context: Context,
     gl: Rc<dyn Gl>,
     window: Box<dyn GlWindow>,
+    read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
     granted_features: Vec<String>,
-    shader: GlWindowShader,
+    shader: Option<GlWindowShader>,
 }
 
 impl DeviceAPI<Surface> for GlWindowDevice {
@@ -190,12 +192,14 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         self.device
             .bind_surface_to_context(&mut self.context, surface)
             .unwrap();
-        let framebuffer_object = self.device
+        let framebuffer_object = self
+            .device
             .context_surface_info(&self.context)
             .unwrap()
             .map(|info| info.framebuffer_object)
             .unwrap_or(0);
-        self.gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
+        self.gl
+            .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
         debug_assert_eq!(
             (
                 self.gl.get_error(),
@@ -242,8 +246,11 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        self.shader
-            .draw_texture(texture_id, texture_target, texture_size, viewport_size);
+        if let Some(ref shader) = self.shader {
+            shader.draw_texture(texture_id, texture_target, texture_size, viewport_size);
+        } else {
+            self.blit_texture(texture_id, texture_target, texture_size, viewport_size);
+        }
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
         self.device
@@ -280,6 +287,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
 
 impl Drop for GlWindowDevice {
     fn drop(&mut self) {
+        self.gl.delete_framebuffers(&[self.read_fbo]);
         let _ = self.device.destroy_context(&mut self.context);
     }
 }
@@ -313,6 +321,7 @@ impl GlWindowDevice {
                 gl::GlesFns::load_with(|s| device.get_proc_address(&context, s))
             },
         };
+        let read_fbo = gl.gen_framebuffers(1)[0];
         let framebuffer_object = device
             .context_surface_info(&context)
             .unwrap()
@@ -335,11 +344,42 @@ impl GlWindowDevice {
             window,
             device,
             context,
+            read_fbo,
             events: Default::default(),
             clip_planes: Default::default(),
             granted_features,
             shader,
         })
+    }
+
+    fn blit_texture(
+        &self,
+        texture_id: GLuint,
+        texture_target: GLuint,
+        texture_size: Size2D<i32, UnknownUnit>,
+        viewport_size: Size2D<i32, Viewport>,
+    ) {
+        self.gl
+            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
+        self.gl.framebuffer_texture_2d(
+            gl::READ_FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            texture_target,
+            texture_id,
+            0,
+        );
+        self.gl.blit_framebuffer(
+            0,
+            0,
+            texture_size.width,
+            texture_size.height,
+            0,
+            0,
+            viewport_size.width * 2,
+            viewport_size.height,
+            gl::COLOR_BUFFER_BIT,
+            gl::NEAREST,
+        );
     }
 
     fn viewport_size(&self) -> Size2D<i32, Viewport> {
@@ -468,7 +508,25 @@ const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &[u8] = b"
 ";
 
 impl GlWindowShader {
-    fn new(gl: Rc<dyn Gl>, mode: GlWindowMode) -> GlWindowShader {
+    fn new(gl: Rc<dyn Gl>, mode: GlWindowMode) -> Option<GlWindowShader> {
+        // The shader source
+        let (vertex_source, fragment_source) = match mode {
+            GlWindowMode::Blit => {
+                return None;
+            }
+            GlWindowMode::StereoLeftRight => {
+                (PASSTHROUGH_VERTEX_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
+            }
+            GlWindowMode::StereoRedCyan => {
+                (ANAGLYPH_VERTEX_SHADER, ANAGLYPH_RED_CYAN_FRAGMENT_SHADER)
+            }
+        };
+
+        // TODO: work out why shaders don't work on macos
+        if cfg!(target_os = "macos") {
+            log::warn!("XR shaders may not render on MacOS.");
+        }
+
         // The four corners of the window in a VAO, set to attribute 0
         let buffer = gl.gen_buffers(1)[0];
         let vao = gl.gen_vertex_arrays(1)[0];
@@ -490,16 +548,6 @@ impl GlWindowShader {
         );
         gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-
-        // The shader source
-        let (vertex_source, fragment_source) = match mode {
-            GlWindowMode::StereoLeftRight => {
-                (PASSTHROUGH_VERTEX_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
-            }
-            GlWindowMode::StereoRedCyan => {
-                (ANAGLYPH_VERTEX_SHADER, ANAGLYPH_RED_CYAN_FRAGMENT_SHADER)
-            }
-        };
 
         // The shader program
         let program = gl.create_program();
@@ -546,13 +594,13 @@ impl GlWindowShader {
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
         // And we're done
-        GlWindowShader {
+        Some(GlWindowShader {
             gl,
             buffer,
             vao,
             program,
             mode,
-        }
+        })
     }
 
     fn draw_texture(

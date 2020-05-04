@@ -16,7 +16,7 @@ pub enum BaseSpace {
     Viewer,
     TargetRay(InputId),
     Grip(InputId),
-    Joint(InputId, Joint)
+    Joint(InputId, Joint),
 }
 
 #[derive(Clone, Copy, Debug)]
