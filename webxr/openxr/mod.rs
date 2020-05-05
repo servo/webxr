@@ -16,7 +16,7 @@ use openxr::{
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
     Fovf, FrameState, FrameStream, FrameWaiter, Instance, Posef, Quaternionf, ReferenceSpaceType,
     Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
-    Vector3f, ViewConfigurationType,
+    SystemId, Vector3f, ViewConfigurationType,
 };
 use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
@@ -33,7 +33,6 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::FrameUpdateEvent;
-use webxr_api::Handedness;
 use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
@@ -44,7 +43,6 @@ use webxr_api::Session as WebXrSession;
 use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
-use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Views;
 use webxr_api::Visibility;
@@ -121,14 +119,19 @@ impl OpenXrDiscovery {
     }
 }
 
-pub fn create_instance() -> Result<Instance, String> {
-    let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
+struct CreatedInstance {
+    instance: Instance,
+    supports_hands: bool,
+    system: SystemId,
+}
 
-    let extensions = entry
+fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
+    let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
+    let supported = entry
         .enumerate_extensions()
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
-    warn!("Available extensions:\n{:?}", extensions);
-
+    warn!("Available extensions:\n{:?}", supported);
+    let mut supports_hands = needs_hands && supported.msft_hand_tracking_preview;
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -138,10 +141,28 @@ pub fn create_instance() -> Result<Instance, String> {
 
     let mut exts = ExtensionSet::default();
     exts.khr_d3d11_enable = true;
+    if supports_hands {
+        exts.msft_hand_tracking_preview = true;
+    }
 
-    entry
+    let instance = entry
         .create_instance(&app_info, &exts)
-        .map_err(|e| format!("Entry::create_instance {:?}", e))
+        .map_err(|e| format!("Entry::create_instance {:?}", e))?;
+    let system = instance
+        .system(FormFactor::HEAD_MOUNTED_DISPLAY)
+        .map_err(|e| format!("Instance::system {:?}", e))?;
+
+    if supports_hands {
+        supports_hands |= instance
+            .supports_hand_tracking(system)
+            .map_err(|e| format!("Instance::supports_hand_tracking {:?}", e))?;
+    }
+
+    Ok(CreatedInstance {
+        instance,
+        supports_hands,
+        system,
+    })
 }
 
 fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
@@ -169,11 +190,18 @@ impl DiscoveryAPI<SwapChains> for OpenXrDiscovery {
         init: &SessionInit,
         xr: SessionBuilder,
     ) -> Result<WebXrSession, Error> {
-        let instance = create_instance().map_err(|e| Error::BackendSpecific(e))?;
         if self.supports_session(mode) {
             let gl_thread = self.gl_thread.clone();
             let provider_registration = self.provider_registration.clone();
-            let granted_features = init.validate(mode, &["local-floor".into()])?;
+            let needs_hands = init.feature_requested("hand-tracking");
+            let instance = create_instance(needs_hands).map_err(|e| Error::BackendSpecific(e))?;
+
+            let mut supported_features = vec!["local-floor".into()];
+            if instance.supports_hands {
+                supported_features.push("hand-tracking".into());
+            }
+
+            let granted_features = init.validate(mode, &supported_features)?;
             let id = xr.id();
             let context_menu_provider = self.context_menu_provider.clone_object();
             xr.spawn(move || {
@@ -414,11 +442,17 @@ impl OpenXrDevice {
     fn new(
         gl_thread: Box<dyn GlThread>,
         provider_registration: Box<dyn SurfaceProviderRegistration>,
-        instance: Instance,
+        instance: CreatedInstance,
         granted_features: Vec<String>,
         id: SessionId,
         context_menu_provider: Box<dyn ContextMenuProvider>,
     ) -> Result<OpenXrDevice, Error> {
+        let CreatedInstance {
+            instance,
+            supports_hands,
+            system,
+        } = instance;
+
         let (device_tx, device_rx) = crossbeam_channel::unbounded();
         let (provider_tx, provider_rx) = crossbeam_channel::unbounded();
         let _ = gl_thread.execute(Box::new(move |device| {
@@ -433,10 +467,6 @@ impl OpenXrDevice {
         }));
         // Get the D3D11 device pointer from the webgl thread.
         let device = device_rx.recv().unwrap();
-
-        let system = instance
-            .system(FormFactor::HEAD_MOUNTED_DISPLAY)
-            .map_err(|e| Error::BackendSpecific(format!("Instance::system {:?}", e)))?;
 
         // FIXME: we should be using these graphics requirements to drive the actual
         //        d3d device creation, rather than assuming the device that surfman
@@ -579,7 +609,8 @@ impl OpenXrDevice {
 
         // input
 
-        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(&instance, &session);
+        let (action_set, right_hand, left_hand) =
+            OpenXRInput::setup_inputs(&instance, &session, supports_hands);
 
         Ok(OpenXrDevice {
             instance,
@@ -892,24 +923,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
 
     fn initial_inputs(&self) -> Vec<InputSource> {
         vec![
-            InputSource {
-                handedness: Handedness::Right,
-                id: InputId(0),
-                target_ray_mode: TargetRayMode::TrackedPointer,
-                supports_grip: true,
-                // XXXManishearth update with whatever we decide
-                // in https://github.com/immersive-web/webxr-input-profiles/issues/105
-                profiles: vec!["generic-hand".into()],
-                hand_support: None,
-            },
-            InputSource {
-                handedness: Handedness::Left,
-                id: InputId(1),
-                target_ray_mode: TargetRayMode::TrackedPointer,
-                supports_grip: true,
-                profiles: vec!["generic-hand".into()],
-                hand_support: None,
-            },
+            self.right_hand.input_source(),
+            self.left_hand.input_source(),
         ]
     }
 

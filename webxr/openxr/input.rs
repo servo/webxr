@@ -1,15 +1,20 @@
 use euclid::RigidTransform3D;
 use openxr::d3d::D3D11;
 use openxr::{
-    self, Action, ActionSet, Binding, FrameState, Instance, Path, Posef, Quaternionf, Session,
-    Space, SpaceLocationFlags, Vector3f,
+    self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandTracker,
+    Instance, Path, Posef, Quaternionf, Session, Space, SpaceLocationFlags, Vector3f,
 };
+use webxr_api::Finger;
+use webxr_api::Hand;
 use webxr_api::Handedness;
 use webxr_api::Input;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
+use webxr_api::InputSource;
+use webxr_api::JointFrame;
 use webxr_api::Native;
 use webxr_api::SelectEvent;
+use webxr_api::TargetRayMode;
 use webxr_api::Viewer;
 
 /// Number of frames to wait with the menu gesture before
@@ -92,6 +97,9 @@ pub struct OpenXRInput {
     click_state: ClickState,
     squeeze_state: ClickState,
     menu_gesture_sustain: u8,
+    #[allow(unused)]
+    hand_tracker: Option<HandTracker>,
+    joints: Option<Hand<Space>>,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -108,6 +116,7 @@ impl OpenXRInput {
         handedness: Handedness,
         action_set: &ActionSet,
         session: &Session<D3D11>,
+        needs_hands: bool,
     ) -> Self {
         let hand = hand_str(handedness);
         let action_aim_pose: Action<Posef> = action_set
@@ -144,6 +153,105 @@ impl OpenXRInput {
                 &[],
             )
             .unwrap();
+
+        let (hand_tracker, joints) = if needs_hands {
+            let hand = match handedness {
+                Handedness::Left => HandEnum::LEFT,
+                Handedness::Right => HandEnum::RIGHT,
+                _ => panic!("We don't support unknown handedness in openxr"),
+            };
+            let hand_tracker = session.create_hand_tracker(hand).unwrap();
+
+            let joints = Hand {
+                wrist: hand_tracker
+                    .create_joint_space(HandJoint::WRIST, IDENTITY_POSE)
+                    .ok(),
+                thumb_metacarpal: hand_tracker
+                    .create_joint_space(HandJoint::THUMB_METACARPAL, IDENTITY_POSE)
+                    .ok(),
+                thumb_phalanx_proximal: hand_tracker
+                    .create_joint_space(HandJoint::THUMB_PROXIMAL, IDENTITY_POSE)
+                    .ok(),
+                thumb_phalanx_distal: hand_tracker
+                    .create_joint_space(HandJoint::THUMB_DISTAL, IDENTITY_POSE)
+                    .ok(),
+                thumb_phalanx_tip: hand_tracker
+                    .create_joint_space(HandJoint::THUMB_TIP, IDENTITY_POSE)
+                    .ok(),
+                index: Finger {
+                    metacarpal: hand_tracker
+                        .create_joint_space(HandJoint::INDEX_METACARPAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_proximal: hand_tracker
+                        .create_joint_space(HandJoint::INDEX_PROXIMAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_intermediate: hand_tracker
+                        .create_joint_space(HandJoint::INDEX_INTERMEDIATE, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_distal: hand_tracker
+                        .create_joint_space(HandJoint::INDEX_DISTAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_tip: hand_tracker
+                        .create_joint_space(HandJoint::INDEX_TIP, IDENTITY_POSE)
+                        .ok(),
+                },
+                middle: Finger {
+                    metacarpal: hand_tracker
+                        .create_joint_space(HandJoint::MIDDLE_METACARPAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_proximal: hand_tracker
+                        .create_joint_space(HandJoint::MIDDLE_PROXIMAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_intermediate: hand_tracker
+                        .create_joint_space(HandJoint::MIDDLE_INTERMEDIATE, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_distal: hand_tracker
+                        .create_joint_space(HandJoint::MIDDLE_DISTAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_tip: hand_tracker
+                        .create_joint_space(HandJoint::MIDDLE_TIP, IDENTITY_POSE)
+                        .ok(),
+                },
+                ring: Finger {
+                    metacarpal: hand_tracker
+                        .create_joint_space(HandJoint::RING_METACARPAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_proximal: hand_tracker
+                        .create_joint_space(HandJoint::RING_PROXIMAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_intermediate: hand_tracker
+                        .create_joint_space(HandJoint::RING_INTERMEDIATE, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_distal: hand_tracker
+                        .create_joint_space(HandJoint::RING_DISTAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_tip: hand_tracker
+                        .create_joint_space(HandJoint::RING_TIP, IDENTITY_POSE)
+                        .ok(),
+                },
+                little: Finger {
+                    metacarpal: hand_tracker
+                        .create_joint_space(HandJoint::LITTLE_METACARPAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_proximal: hand_tracker
+                        .create_joint_space(HandJoint::LITTLE_PROXIMAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_intermediate: hand_tracker
+                        .create_joint_space(HandJoint::LITTLE_INTERMEDIATE, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_distal: hand_tracker
+                        .create_joint_space(HandJoint::LITTLE_DISTAL, IDENTITY_POSE)
+                        .ok(),
+                    phalanx_tip: hand_tracker
+                        .create_joint_space(HandJoint::LITTLE_TIP, IDENTITY_POSE)
+                        .ok(),
+                },
+            };
+            (Some(hand_tracker), Some(joints))
+        } else {
+            (None, None)
+        };
+
         Self {
             id,
             action_aim_pose,
@@ -156,13 +264,31 @@ impl OpenXRInput {
             click_state: ClickState::Done,
             squeeze_state: ClickState::Done,
             menu_gesture_sustain: 0,
+            hand_tracker,
+            joints,
         }
     }
 
-    pub fn setup_inputs(instance: &Instance, session: &Session<D3D11>) -> (ActionSet, Self, Self) {
+    pub fn setup_inputs(
+        instance: &Instance,
+        session: &Session<D3D11>,
+        needs_hands: bool,
+    ) -> (ActionSet, Self, Self) {
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
-        let right_hand = OpenXRInput::new(InputId(0), Handedness::Right, &action_set, &session);
-        let left_hand = OpenXRInput::new(InputId(1), Handedness::Left, &action_set, &session);
+        let right_hand = OpenXRInput::new(
+            InputId(0),
+            Handedness::Right,
+            &action_set,
+            &session,
+            needs_hands,
+        );
+        let left_hand = OpenXRInput::new(
+            InputId(1),
+            Handedness::Left,
+            &action_set,
+            &session,
+            needs_hands,
+        );
 
         let mut bindings =
             right_hand.get_bindings(instance, "trigger/value", Some("squeeze/click"));
@@ -290,13 +416,19 @@ impl OpenXRInput {
             self.squeeze_state
                 .update(&self.action_squeeze, session, menu_selected);
 
+        let hand = target_ray_origin
+            .and_then(|_origin| self.joints.as_ref())
+            .map(|joints| Box::new(joints.map(|j, _| {
+                j.as_ref().and_then(|j| joint_for(j, frame_state, base_space))
+            })));
+
         let input_frame = InputFrame {
             target_ray_origin,
             id: self.id,
             pressed: click_is_active && click.current_state,
             squeezed: squeeze_is_active && squeeze.current_state,
             grip_origin,
-            hand: None,
+            hand,
         };
 
         Frame {
@@ -304,6 +436,22 @@ impl OpenXRInput {
             select: click_event,
             squeeze: squeeze_event,
             menu_selected,
+        }
+    }
+
+    pub fn input_source(&self) -> InputSource {
+        InputSource {
+            handedness: self.handedness,
+            id: self.id,
+            target_ray_mode: TargetRayMode::TrackedPointer,
+            supports_grip: true,
+            // XXXManishearth update with whatever we decide
+            // in https://github.com/immersive-web/webxr-input-profiles/issues/105
+            profiles: vec!["generic-hand".into()],
+            hand_support: self
+                .joints
+                .as_ref()
+                .map(|h| h.map(|j, _| j.as_ref().map(|_| ()))),
         }
     }
 }
@@ -321,6 +469,27 @@ fn pose_for(
         .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
     if pose_valid {
         Some(super::transform(&location.pose))
+    } else {
+        None
+    }
+}
+
+fn joint_for(
+    joint_space: &Space,
+    frame_state: &FrameState,
+    base_space: &Space,
+) -> Option<JointFrame> {
+    let (location, radius) = joint_space
+        .locate_radius(base_space, frame_state.predicted_display_time)
+        .unwrap();
+    let pose_valid = location
+        .location_flags
+        .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
+    if pose_valid {
+        Some(JointFrame {
+            pose: super::transform(&location.pose),
+            radius,
+        })
     } else {
         None
     }
