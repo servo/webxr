@@ -119,13 +119,13 @@ impl OpenXrDiscovery {
     }
 }
 
-struct CreatedInstance {
+pub struct CreatedInstance {
     instance: Instance,
     supports_hands: bool,
     system: SystemId,
 }
 
-fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
+pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
     let supported = entry
         .enumerate_extensions()
