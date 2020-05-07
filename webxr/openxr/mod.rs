@@ -18,7 +18,7 @@ use openxr::{
     Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
     SystemId, Vector3f, ViewConfigurationType,
 };
-use std::mem;
+use std::{cmp, mem};
 use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
 use std::ptr;
@@ -59,6 +59,8 @@ mod input;
 use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.4;
+
+const SECONDARY_VIEW_ENABLED: bool = true;
 
 pub trait GlThread: Send {
     fn execute(&self, runnable: Box<dyn FnOnce(&SurfmanDevice) + Send>);
@@ -129,6 +131,7 @@ impl OpenXrDiscovery {
 pub struct CreatedInstance {
     instance: Instance,
     supports_hands: bool,
+    supports_secondary: bool,
     system: SystemId,
 }
 
@@ -139,6 +142,9 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
     warn!("Available extensions:\n{:?}", supported);
     let mut supports_hands = needs_hands && supported.msft_hand_tracking_preview;
+    let supports_secondary = SECONDARY_VIEW_ENABLED
+        && supported.msft_secondary_view_configuration_preview
+        && supported.msft_first_person_observer_preview;
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -150,6 +156,11 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     exts.khr_d3d11_enable = true;
     if supports_hands {
         exts.msft_hand_tracking_preview = true;
+    }
+
+    if supports_secondary {
+        exts.msft_secondary_view_configuration_preview = true;
+        exts.msft_first_person_observer_preview = true;
     }
 
     let instance = entry
@@ -168,6 +179,7 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     Ok(CreatedInstance {
         instance,
         supports_hands,
+        supports_secondary,
         system,
     })
 }
@@ -287,6 +299,7 @@ struct OpenXrDevice {
     blend_mode: EnvironmentBlendMode,
     clip_planes: ClipPlanes,
     view_configurations: Vec<openxr::ViewConfigurationView>,
+    secondary_configuration: Option<openxr::ViewConfigurationView>,
 
     // input
     action_set: ActionSet,
@@ -305,6 +318,7 @@ struct SharedData {
     frame_stream: FrameStream<D3D11>,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
+    secondary_extent: Option<Extent2Di>,
     space: Space,
 }
 
@@ -503,6 +517,7 @@ impl OpenXrDevice {
         let CreatedInstance {
             instance,
             supports_hands,
+            supports_secondary,
             system,
         } = instance;
 
@@ -542,9 +557,16 @@ impl OpenXrDevice {
 
         // XXXPaul initialisation should happen on SessionStateChanged(Ready)?
 
-        session
-            .begin(ViewConfigurationType::PRIMARY_STEREO)
-            .map_err(|e| Error::BackendSpecific(format!("Session::begin {:?}", e)))?;
+        if supports_secondary {
+            session
+                .begin_with_secondary(ViewConfigurationType::PRIMARY_STEREO,
+                                      &[ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT])
+                .map_err(|e| Error::BackendSpecific(format!("Session::begin_with_secondary {:?}", e)))?;
+        } else {
+            session
+                .begin(ViewConfigurationType::PRIMARY_STEREO)
+                .map_err(|e| Error::BackendSpecific(format!("Session::begin {:?}", e)))?;
+        }
 
         let pose = Posef {
             orientation: Quaternionf {
@@ -601,6 +623,35 @@ impl OpenXrDevice {
             height: right_view_configuration.recommended_image_rect_height as i32,
         };
 
+        assert_eq!(
+            left_view_configuration.recommended_image_rect_height,
+            right_view_configuration.recommended_image_rect_height,
+        );
+        let mut sw_width = left_view_configuration.recommended_image_rect_width + right_view_configuration.recommended_image_rect_width;
+        let mut sw_height = left_view_configuration.recommended_image_rect_height;
+        let (secondary_configuration, secondary_extent) = if supports_secondary {
+            let view_configuration = *instance
+                .enumerate_view_configuration_views(
+                    system,
+                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                )
+                .map_err(|e| {
+                    Error::BackendSpecific(format!(
+                        "Session::enumerate_view_configuration_views {:?}",
+                        e
+                    ))
+                })?.get(0).expect("Session::enumerate_view_configuration_views() returned no secondary views");
+            let extent = Extent2Di {
+                width: view_configuration.recommended_image_rect_width as i32,
+                height: view_configuration.recommended_image_rect_height as i32,
+            };
+            sw_width += view_configuration.recommended_image_rect_width;
+            sw_height = cmp::max(sw_height, view_configuration.recommended_image_rect_height);
+            (Some(view_configuration), Some(extent))
+        } else {
+            (None, None)
+        };
+
         // Create swapchains
 
         // XXXManishearth should we be doing this, or letting Servo set the format?
@@ -608,18 +659,14 @@ impl OpenXrDevice {
             Error::BackendSpecific(format!("Session::enumerate_swapchain_formats {:?}", e))
         })?;
         let format = pick_format(&formats);
-        assert_eq!(
-            left_view_configuration.recommended_image_rect_height,
-            right_view_configuration.recommended_image_rect_height,
-        );
+
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
             format,
             sample_count: 1,
-            width: left_view_configuration.recommended_image_rect_width
-                + right_view_configuration.recommended_image_rect_width,
-            height: left_view_configuration.recommended_image_rect_height,
+            width: sw_width,
+            height: sw_height,
             face_count: 1,
             array_size: 1,
             mip_count: 1,
@@ -644,6 +691,7 @@ impl OpenXrDevice {
             openxr_views: vec![],
             left_extent,
             right_extent,
+            secondary_extent,
         }));
 
         let provider = Box::new(OpenXrProvider {
@@ -674,6 +722,7 @@ impl OpenXrDevice {
             clip_planes: Default::default(),
             blend_mode,
             view_configurations,
+            secondary_configuration,
             shared_data,
 
             action_set,
