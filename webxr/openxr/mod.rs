@@ -318,7 +318,7 @@ struct SharedData {
     frame_stream: FrameStream<D3D11>,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
-    secondary_extent: Option<Extent2Di>,
+    secondary_data: Option<(Extent2Di, EnvironmentBlendMode)>,
     secondary_view: Option<openxr::View>,
     space: Space,
 }
@@ -391,6 +391,9 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
 
         if let Some(secondary_view) = data.secondary_view {
             let mut s_fov = secondary_view.fov;
+            let (secondary_extent, secondary_blend_mode) = data
+                .secondary_data
+                .expect("secondary data must be set if secondary views are enabled");
             std::mem::swap(&mut s_fov.angle_up, &mut s_fov.angle_down);
             let views = [openxr::CompositionLayerProjectionView::new()
                 .pose(secondary_view.pose)
@@ -404,9 +407,7 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
                                 x: data.left_extent.width + data.right_extent.width,
                                 y: 0,
                             },
-                            extent: data.secondary_extent.expect(
-                                "secondary extent must be set if secondary views are enabled",
-                            ),
+                            extent: secondary_extent,
                         }),
                 )];
 
@@ -422,7 +423,7 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
                     ty: ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
                     // XXXManishearth should we use the secondary layer's blend mode here, given
                     // that the content will be using the primary blend mode?
-                    environment_blend_mode: self.blend_mode,
+                    environment_blend_mode: secondary_blend_mode,
                     layers: &secondary_layers,
                 },
             ) {
@@ -676,7 +677,7 @@ impl OpenXrDevice {
         let mut sw_width = left_view_configuration.recommended_image_rect_width
             + right_view_configuration.recommended_image_rect_width;
         let mut sw_height = left_view_configuration.recommended_image_rect_height;
-        let (secondary_configuration, secondary_extent) = if supports_secondary {
+        let (secondary_configuration, secondary_data) = if supports_secondary {
             let view_configuration = *instance
                 .enumerate_view_configuration_views(
                     system,
@@ -698,7 +699,21 @@ impl OpenXrDevice {
             };
             sw_width += view_configuration.recommended_image_rect_width;
             sw_height = cmp::max(sw_height, view_configuration.recommended_image_rect_height);
-            (Some(view_configuration), Some(extent))
+            let secondary_blend_mode = instance
+                .enumerate_environment_blend_modes(
+                    system,
+                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                )
+                .map_err(|e| {
+                    Error::BackendSpecific(format!(
+                        "Instance::enumerate_environment_blend_modes {:?}",
+                        e
+                    ))
+                })?[0];
+            (
+                Some(view_configuration),
+                Some((extent, secondary_blend_mode)),
+            )
         } else {
             (None, None)
         };
@@ -743,7 +758,7 @@ impl OpenXrDevice {
             secondary_view: None,
             left_extent,
             right_extent,
-            secondary_extent,
+            secondary_data,
         }));
 
         let provider = Box::new(OpenXrProvider {
