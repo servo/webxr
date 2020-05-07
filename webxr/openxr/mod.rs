@@ -15,8 +15,8 @@ use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
     Fovf, FrameState, FrameStream, FrameWaiter, Instance, Posef, Quaternionf, ReferenceSpaceType,
-    Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
-    SystemId, Vector3f, ViewConfigurationType,
+    SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
+    SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
 };
 use std::{cmp, mem};
 use std::sync::{Arc, Mutex};
@@ -389,12 +389,53 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
             .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
             .views(&views[..])];
 
-        if let Err(e) = data.frame_stream.end(
-            data.frame_state.as_ref().unwrap().predicted_display_time,
-            self.blend_mode,
-            &layers[..],
-        ) {
-            error!("Error ending frame: {:?}", e);
+        if let Some(secondary_view) = data.secondary_view {
+            let mut s_fov = secondary_view.fov;
+            std::mem::swap(&mut s_fov.angle_up, &mut s_fov.angle_down);
+            let views = [openxr::CompositionLayerProjectionView::new()
+                .pose(secondary_view.pose)
+                .fov(s_fov)
+                .sub_image(
+                    openxr::SwapchainSubImage::new()
+                        .swapchain(&self.swapchain)
+                        .image_array_index(0)
+                        .image_rect(openxr::Rect2Di {
+                            offset: openxr::Offset2Di {
+                                x: data.left_extent.width + data.right_extent.width,
+                                y: 0,
+                            },
+                            extent: data.secondary_extent.expect(
+                                "secondary extent must be set if secondary views are enabled",
+                            ),
+                        }),
+                )];
+
+            let secondary_layers = [&*CompositionLayerProjection::new()
+                .space(&data.space)
+                .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+                .views(&views[..])];
+            if let Err(e) = data.frame_stream.end_secondary(
+                data.frame_state.as_ref().unwrap().predicted_display_time,
+                self.blend_mode,
+                &layers[..],
+                SecondaryEndInfo {
+                    ty: ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                    // XXXManishearth should we use the secondary layer's blend mode here, given
+                    // that the content will be using the primary blend mode?
+                    environment_blend_mode: self.blend_mode,
+                    layers: &secondary_layers,
+                },
+            ) {
+                error!("Error ending frame: {:?}", e);
+            }
+        } else {
+            if let Err(e) = data.frame_stream.end(
+                data.frame_state.as_ref().unwrap().predicted_display_time,
+                self.blend_mode,
+                &layers[..],
+            ) {
+                error!("Error ending frame: {:?}", e);
+            }
         }
     }
 
