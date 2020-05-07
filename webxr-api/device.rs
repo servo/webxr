@@ -51,6 +51,10 @@ pub trait DeviceAPI<Surface>: 'static {
             Views::Inline => return None,
             Views::Mono(view) => view.viewport,
             Views::Stereo(left, right) => left.viewport.union(&right.viewport),
+            Views::StereoCapture(left, right, third_eye) => left
+                .viewport
+                .union(&right.viewport)
+                .union(&third_eye.viewport),
         };
         Some(Size2D::new(viewport.max_x(), viewport.max_y()))
     }
