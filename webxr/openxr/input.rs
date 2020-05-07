@@ -418,9 +418,12 @@ impl OpenXRInput {
 
         let hand = target_ray_origin
             .and_then(|_origin| self.joints.as_ref())
-            .map(|joints| Box::new(joints.map(|j, _| {
-                j.as_ref().and_then(|j| joint_for(j, frame_state, base_space))
-            })));
+            .map(|joints| {
+                Box::new(joints.map(|j, _| {
+                    j.as_ref()
+                        .and_then(|j| joint_for(j, frame_state, base_space))
+                }))
+            });
 
         let input_frame = InputFrame {
             target_ray_origin,
