@@ -9,7 +9,7 @@ use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
 use log::{error, warn};
-use openxr::d3d::{SessionCreateInfo, D3D11};
+use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
 use openxr::Graphics;
 use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
@@ -18,8 +18,11 @@ use openxr::{
     Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
     SystemId, Vector3f, ViewConfigurationType,
 };
+use std::mem;
 use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
+use std::ptr;
+use surfman::Adapter;
 use surfman::Device as SurfmanDevice;
 use surfman::Surface;
 use surfman_chains::SurfaceProvider;
@@ -46,7 +49,11 @@ use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Views;
 use webxr_api::Visibility;
+use winapi::Interface;
+use winapi::shared::dxgi;
 use winapi::shared::dxgiformat;
+use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
+use wio::com::ComPtr;
 
 mod input;
 use input::OpenXRInput;
@@ -163,6 +170,52 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
         supports_hands,
         system,
     })
+}
+
+fn get_matching_adapter(
+    requirements: &Requirements,
+) -> Result<ComPtr<dxgi::IDXGIAdapter1>, String> {
+    unsafe {
+        let mut factory_ptr: *mut dxgi::IDXGIFactory1 = ptr::null_mut();
+        let result = dxgi::CreateDXGIFactory1(
+            &dxgi::IDXGIFactory1::uuidof(),
+            &mut factory_ptr as *mut _ as *mut _,
+        );
+        assert_eq!(result, S_OK);
+        let factory = ComPtr::from_raw(factory_ptr);
+
+        let index = 0;
+        loop {
+            let mut adapter_ptr = ptr::null_mut();
+            let result = factory.EnumAdapters1(index, &mut adapter_ptr);
+            if result == DXGI_ERROR_NOT_FOUND {
+                return Err("No matching adapter".to_owned());
+            }
+            assert_eq!(result, S_OK);
+            let adapter = ComPtr::from_raw(adapter_ptr);
+            let mut adapter_desc = mem::zeroed();
+            let result = adapter.GetDesc1(&mut adapter_desc);
+            assert_eq!(result, S_OK);
+            let adapter_luid = &adapter_desc.AdapterLuid;
+            if adapter_luid.LowPart == requirements.adapter_luid.LowPart
+                && adapter_luid.HighPart == requirements.adapter_luid.HighPart
+            {
+                return Ok(adapter);
+            }
+        }
+    }
+}
+
+pub fn create_surfman_adapter() -> Option<Adapter> {
+    let instance = create_instance(false).ok()?;
+    let system = instance
+        .instance
+        .system(FormFactor::HEAD_MOUNTED_DISPLAY)
+        .ok()?;
+
+    let requirements = D3D11::requirements(&instance.instance, system).ok()?;
+    let adapter = get_matching_adapter(&requirements).ok()?;
+    Some(Adapter::from_dxgi_adapter(adapter.up()))
 }
 
 fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
@@ -468,11 +521,11 @@ impl OpenXrDevice {
         // Get the D3D11 device pointer from the webgl thread.
         let device = device_rx.recv().unwrap();
 
-        // FIXME: we should be using these graphics requirements to drive the actual
-        //        d3d device creation, rather than assuming the device that surfman
-        //        already created is appropriate. OpenXR returns a validation error
-        //        unless we call this method, so we call it and ignore the results
-        //        in the short term.
+        // OpenXR returns a validation error unless we call this method, so we call it
+        // and ignore the results. Users of this backend are expected to have already called
+        // create_surfman_adapter, which uses the graphics requirements to create a matching
+        // surfman adapter. The previous code that obtains a D3D11 device is expected to
+        // have been created via this matching adapter.
         let _requirements = D3D11::requirements(&instance, system)
             .map_err(|e| Error::BackendSpecific(format!("D3D11::requirements {:?}", e)))?;
 
