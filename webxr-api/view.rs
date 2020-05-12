@@ -60,6 +60,11 @@ pub enum Viewport {}
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Input {}
 
+/// The coordinate space of a secondary capture view
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum Capture {}
+
 /// For each eye, the transform from the viewer to that eye,
 /// its projection onto its display, and its display viewport.
 /// For stereo displays, we have a `View<LeftEye>` and a `View<RightEye>`.
@@ -91,4 +96,5 @@ pub enum Views {
     Inline,
     Mono(View<Viewer>),
     Stereo(View<LeftEye>, View<RightEye>),
+    StereoCapture(View<LeftEye>, View<RightEye>, View<Capture>),
 }

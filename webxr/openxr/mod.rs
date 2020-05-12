@@ -15,10 +15,10 @@ use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
     Fovf, FrameState, FrameStream, FrameWaiter, Instance, Posef, Quaternionf, ReferenceSpaceType,
-    Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo, SwapchainUsageFlags,
-    SystemId, Vector3f, ViewConfigurationType,
+    SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
+    SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
 };
-use std::mem;
+use std::{cmp, mem};
 use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
 use std::ptr;
@@ -59,6 +59,13 @@ mod input;
 use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.4;
+
+// Whether or not the secondary view is enabled
+// Disabled by default to reduce texture sizes
+// XXXManishearth we can make this into a pref
+const SECONDARY_VIEW_ENABLED: bool = false;
+// How much to downscale the view capture by.
+const SECONDARY_VIEW_DOWNSCALE: u32 = 2;
 
 pub trait GlThread: Send {
     fn execute(&self, runnable: Box<dyn FnOnce(&SurfmanDevice) + Send>);
@@ -129,6 +136,7 @@ impl OpenXrDiscovery {
 pub struct CreatedInstance {
     instance: Instance,
     supports_hands: bool,
+    supports_secondary: bool,
     system: SystemId,
 }
 
@@ -139,6 +147,9 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
     warn!("Available extensions:\n{:?}", supported);
     let mut supports_hands = needs_hands && supported.msft_hand_tracking_preview;
+    let supports_secondary = SECONDARY_VIEW_ENABLED
+        && supported.msft_secondary_view_configuration_preview
+        && supported.msft_first_person_observer_preview;
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -150,6 +161,11 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     exts.khr_d3d11_enable = true;
     if supports_hands {
         exts.msft_hand_tracking_preview = true;
+    }
+
+    if supports_secondary {
+        exts.msft_secondary_view_configuration_preview = true;
+        exts.msft_first_person_observer_preview = true;
     }
 
     let instance = entry
@@ -168,6 +184,7 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     Ok(CreatedInstance {
         instance,
         supports_hands,
+        supports_secondary,
         system,
     })
 }
@@ -287,6 +304,7 @@ struct OpenXrDevice {
     blend_mode: EnvironmentBlendMode,
     clip_planes: ClipPlanes,
     view_configurations: Vec<openxr::ViewConfigurationView>,
+    secondary_configuration: Option<openxr::ViewConfigurationView>,
 
     // input
     action_set: ActionSet,
@@ -295,6 +313,8 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
+
+    needs_view_update: bool,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -305,6 +325,8 @@ struct SharedData {
     frame_stream: FrameStream<D3D11>,
     left_extent: Extent2Di,
     right_extent: Extent2Di,
+    secondary_data: Option<(Extent2Di, EnvironmentBlendMode)>,
+    secondary_view: Option<openxr::View>,
     space: Space,
 }
 
@@ -374,12 +396,54 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
             .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
             .views(&views[..])];
 
-        if let Err(e) = data.frame_stream.end(
-            data.frame_state.as_ref().unwrap().predicted_display_time,
-            self.blend_mode,
-            &layers[..],
-        ) {
-            error!("Error ending frame: {:?}", e);
+        if let Some(secondary_view) = data.secondary_view {
+            let mut s_fov = secondary_view.fov;
+            let (secondary_extent, secondary_blend_mode) = data
+                .secondary_data
+                .expect("secondary data must be set if secondary views are enabled");
+            std::mem::swap(&mut s_fov.angle_up, &mut s_fov.angle_down);
+            let views = [openxr::CompositionLayerProjectionView::new()
+                .pose(secondary_view.pose)
+                .fov(s_fov)
+                .sub_image(
+                    openxr::SwapchainSubImage::new()
+                        .swapchain(&self.swapchain)
+                        .image_array_index(0)
+                        .image_rect(openxr::Rect2Di {
+                            offset: openxr::Offset2Di {
+                                x: data.left_extent.width + data.right_extent.width,
+                                y: 0,
+                            },
+                            extent: secondary_extent,
+                        }),
+                )];
+
+            let secondary_layers = [&*CompositionLayerProjection::new()
+                .space(&data.space)
+                .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+                .views(&views[..])];
+            if let Err(e) = data.frame_stream.end_secondary(
+                data.frame_state.as_ref().unwrap().predicted_display_time,
+                self.blend_mode,
+                &layers[..],
+                SecondaryEndInfo {
+                    ty: ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                    // XXXManishearth should we use the secondary layer's blend mode here, given
+                    // that the content will be using the primary blend mode?
+                    environment_blend_mode: secondary_blend_mode,
+                    layers: &secondary_layers,
+                },
+            ) {
+                error!("Error ending frame: {:?}", e);
+            }
+        } else {
+            if let Err(e) = data.frame_stream.end(
+                data.frame_state.as_ref().unwrap().predicted_display_time,
+                self.blend_mode,
+                &layers[..],
+            ) {
+                error!("Error ending frame: {:?}", e);
+            }
         }
     }
 
@@ -503,6 +567,7 @@ impl OpenXrDevice {
         let CreatedInstance {
             instance,
             supports_hands,
+            supports_secondary,
             system,
         } = instance;
 
@@ -542,9 +607,20 @@ impl OpenXrDevice {
 
         // XXXPaul initialisation should happen on SessionStateChanged(Ready)?
 
-        session
-            .begin(ViewConfigurationType::PRIMARY_STEREO)
-            .map_err(|e| Error::BackendSpecific(format!("Session::begin {:?}", e)))?;
+        if supports_secondary {
+            session
+                .begin_with_secondary(
+                    ViewConfigurationType::PRIMARY_STEREO,
+                    &[ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT],
+                )
+                .map_err(|e| {
+                    Error::BackendSpecific(format!("Session::begin_with_secondary {:?}", e))
+                })?;
+        } else {
+            session
+                .begin(ViewConfigurationType::PRIMARY_STEREO)
+                .map_err(|e| Error::BackendSpecific(format!("Session::begin {:?}", e)))?;
+        }
 
         let pose = Posef {
             orientation: Quaternionf {
@@ -601,6 +677,59 @@ impl OpenXrDevice {
             height: right_view_configuration.recommended_image_rect_height as i32,
         };
 
+        assert_eq!(
+            left_view_configuration.recommended_image_rect_height,
+            right_view_configuration.recommended_image_rect_height,
+        );
+        let mut sw_width = left_view_configuration.recommended_image_rect_width
+            + right_view_configuration.recommended_image_rect_width;
+        let mut sw_height = left_view_configuration.recommended_image_rect_height;
+        let (secondary_configuration, secondary_data) = if supports_secondary {
+            let view_configuration = *instance
+                .enumerate_view_configuration_views(
+                    system,
+                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                )
+                .map_err(|e| {
+                    Error::BackendSpecific(format!(
+                        "Session::enumerate_view_configuration_views {:?}",
+                        e
+                    ))
+                })?
+                .get(0)
+                .expect(
+                    "Session::enumerate_view_configuration_views() returned no secondary views",
+                );
+            let extent = Extent2Di {
+                width: (view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE)
+                    as i32,
+                height: (view_configuration.recommended_image_rect_height
+                    / SECONDARY_VIEW_DOWNSCALE) as i32,
+            };
+            sw_width += view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE;
+            sw_height = cmp::max(
+                sw_height,
+                view_configuration.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE,
+            );
+            let secondary_blend_mode = instance
+                .enumerate_environment_blend_modes(
+                    system,
+                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                )
+                .map_err(|e| {
+                    Error::BackendSpecific(format!(
+                        "Instance::enumerate_environment_blend_modes {:?}",
+                        e
+                    ))
+                })?[0];
+            (
+                Some(view_configuration),
+                Some((extent, secondary_blend_mode)),
+            )
+        } else {
+            (None, None)
+        };
+
         // Create swapchains
 
         // XXXManishearth should we be doing this, or letting Servo set the format?
@@ -608,18 +737,14 @@ impl OpenXrDevice {
             Error::BackendSpecific(format!("Session::enumerate_swapchain_formats {:?}", e))
         })?;
         let format = pick_format(&formats);
-        assert_eq!(
-            left_view_configuration.recommended_image_rect_height,
-            right_view_configuration.recommended_image_rect_height,
-        );
+
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
             format,
             sample_count: 1,
-            width: left_view_configuration.recommended_image_rect_width
-                + right_view_configuration.recommended_image_rect_width,
-            height: left_view_configuration.recommended_image_rect_height,
+            width: sw_width,
+            height: sw_height,
             face_count: 1,
             array_size: 1,
             mip_count: 1,
@@ -642,8 +767,10 @@ impl OpenXrDevice {
             frame_state: None,
             space,
             openxr_views: vec![],
+            secondary_view: None,
             left_extent,
             right_extent,
+            secondary_data,
         }));
 
         let provider = Box::new(OpenXrProvider {
@@ -674,6 +801,7 @@ impl OpenXrDevice {
             clip_planes: Default::default(),
             blend_mode,
             view_configurations,
+            secondary_configuration,
             shared_data,
 
             action_set,
@@ -682,6 +810,7 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
+            needs_view_update: false,
         })
     }
 
@@ -820,7 +949,38 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
             viewport: right_vp,
         };
-
+        if let Some(config) = self.secondary_configuration {
+            if data.secondary_view.is_some() {
+                let (_view_flags, views) = match self.session.locate_views(
+                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                    frame_state.predicted_display_time,
+                    &self.viewer_space,
+                ) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Error locating views: {:?}", e);
+                        return default_views;
+                    }
+                };
+                let secondary_vp = Rect::new(
+                    Point2D::new(
+                        left_view_configuration.recommended_image_rect_width as i32
+                            + right_view_configuration.recommended_image_rect_width as i32,
+                        0,
+                    ),
+                    Size2D::new(
+                        (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
+                        (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
+                    ),
+                );
+                let third_eye = View {
+                    transform: transform(&views[0].pose).inverse(),
+                    projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
+                    viewport: secondary_vp,
+                };
+                return Views::StereoCapture(left_view, right_view, third_eye);
+            }
+        }
         Views::Stereo(left_view, right_view)
     }
 
@@ -842,13 +1002,48 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let mut data = self.shared_data.lock().unwrap();
-        let needs_view_update = data.frame_state.is_none();
-        let frame_state = match self.frame_waiter.wait() {
-            Ok(frame_state) => frame_state,
-            Err(e) => {
-                error!("Error waiting on frame: {:?}", e);
-                return None;
+        let needs_view_update = data.frame_state.is_none() || self.needs_view_update;
+        let mut next_frame_needs_view_update = false;
+        let (frame_state, secondary_active) = if self.secondary_configuration.is_some() {
+            let (frame_state, secondary_state) = match self
+                .frame_waiter
+                .wait_secondary(ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT)
+            {
+                Ok(frame_state) => frame_state,
+                Err(e) => {
+                    error!("Error waiting on frame: {:?}", e);
+                    return None;
+                }
+            };
+
+            assert_eq!(
+                secondary_state.ty,
+                ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT
+            );
+            if data.secondary_view.is_some() != secondary_state.active {
+                // will be filled in later if necessary
+                data.secondary_view = None;
+                // views array has changed size
+                next_frame_needs_view_update = true;
+
+                println!(
+                    "Secondary view configuration state changed to {}",
+                    secondary_state.active
+                );
             }
+
+            (frame_state, secondary_state.active)
+        } else {
+            (
+                match self.frame_waiter.wait() {
+                    Ok(frame_state) => frame_state,
+                    Err(e) => {
+                        error!("Error waiting on frame: {:?}", e);
+                        return None;
+                    }
+                },
+                false,
+            )
         };
 
         let time_ns = time::precise_time_ns();
@@ -883,6 +1078,21 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         };
         let transform = transform(&pose.pose);
 
+        if secondary_active {
+            let (_view_flags, views) = match self.session.locate_views(
+                ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
+                frame_state.predicted_display_time,
+                &data.space,
+            ) {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Error locating views: {:?}", e);
+                    return None;
+                }
+            };
+            data.secondary_view = Some(views[0]);
+        }
+
         let active_action_set = ActiveActionSet::new(&self.action_set);
 
         if let Err(e) = self.session.sync_actions(&[active_action_set]) {
@@ -906,6 +1116,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         } else {
             vec![]
         };
+
+        if next_frame_needs_view_update {
+            self.needs_view_update = true;
+        }
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
