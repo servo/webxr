@@ -60,7 +60,12 @@ use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.4;
 
-const SECONDARY_VIEW_ENABLED: bool = true;
+// Whether or not the secondary view is enabled
+// Disabled by default to reduce texture sizes
+// XXXManishearth we can make this into a pref
+const SECONDARY_VIEW_ENABLED: bool = false;
+// How much to downscale the view capture by.
+const SECONDARY_VIEW_DOWNSCALE: u32 = 2;
 
 pub trait GlThread: Send {
     fn execute(&self, runnable: Box<dyn FnOnce(&SurfmanDevice) + Send>);
@@ -696,11 +701,16 @@ impl OpenXrDevice {
                     "Session::enumerate_view_configuration_views() returned no secondary views",
                 );
             let extent = Extent2Di {
-                width: view_configuration.recommended_image_rect_width as i32,
-                height: view_configuration.recommended_image_rect_height as i32,
+                width: (view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE)
+                    as i32,
+                height: (view_configuration.recommended_image_rect_height
+                    / SECONDARY_VIEW_DOWNSCALE) as i32,
             };
-            sw_width += view_configuration.recommended_image_rect_width;
-            sw_height = cmp::max(sw_height, view_configuration.recommended_image_rect_height);
+            sw_width += view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE;
+            sw_height = cmp::max(
+                sw_height,
+                view_configuration.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE,
+            );
             let secondary_blend_mode = instance
                 .enumerate_environment_blend_modes(
                     system,
@@ -959,8 +969,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                         0,
                     ),
                     Size2D::new(
-                        config.recommended_image_rect_width as i32,
-                        config.recommended_image_rect_height as i32,
+                        (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
+                        (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
                     ),
                 );
                 let third_eye = View {
