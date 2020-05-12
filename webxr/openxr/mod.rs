@@ -308,6 +308,8 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
+
+    needs_view_update: bool,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -798,6 +800,7 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
+            needs_view_update: false,
         })
     }
 
@@ -936,7 +939,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
             viewport: right_vp,
         };
-
         if let Some(config) = self.secondary_configuration {
             if data.secondary_view.is_some() {
                 let (_view_flags, views) = match self.session.locate_views(
@@ -969,7 +971,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 return Views::StereoCapture(left_view, right_view, third_eye);
             }
         }
-
         Views::Stereo(left_view, right_view)
     }
 
@@ -991,7 +992,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let mut data = self.shared_data.lock().unwrap();
-        let mut needs_view_update = data.frame_state.is_none();
+        let needs_view_update = data.frame_state.is_none() || self.needs_view_update;
+        let mut next_frame_needs_view_update = false;
         let (frame_state, secondary_active) = if self.secondary_configuration.is_some() {
             let (frame_state, secondary_state) = match self
                 .frame_waiter
@@ -1012,7 +1014,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 // will be filled in later if necessary
                 data.secondary_view = None;
                 // views array has changed size
-                needs_view_update = true;
+                next_frame_needs_view_update = true;
 
                 println!(
                     "Secondary view configuration state changed to {}",
@@ -1104,6 +1106,10 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         } else {
             vec![]
         };
+
+        if next_frame_needs_view_update {
+            self.needs_view_update = true;
+        }
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
