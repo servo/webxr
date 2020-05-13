@@ -9,7 +9,6 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
@@ -19,6 +18,7 @@ use webxr_api::Sender;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::Viewport;
 use webxr_api::Views;
 
 use crate::gles as gl;
@@ -383,6 +383,14 @@ impl GoogleVRDevice {
         self.presenting = false;
     }
 
+    fn views(&self) -> Views {
+        unsafe {
+            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
+            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
+            Views::Stereo(left_view, right_view)
+        }
+    }
+
     unsafe fn fetch_eye<T>(&self, eye: gvr::gvr_eye, vp: *mut gvr::gvr_buffer_viewport) -> View<T> {
         let eye_fov = gvr::gvr_buffer_viewport_get_source_fov(vp);
         let projection = fov_to_projection_matrix(&eye_fov, self.clip_planes);
@@ -588,12 +596,8 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         Some(RigidTransform3D::identity())
     }
 
-    fn views(&self) -> Views {
-        unsafe {
-            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
-            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
-            Views::Stereo(left_view, right_view)
-        }
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        self.views().recommended_framebuffer_resolution()
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -601,16 +605,13 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
             self.acquire_frame();
         }
         let time_ns = time::precise_time_ns();
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
+
         // Predict head matrix
         Some(Frame {
             transform: Some(self.fetch_head_matrix()),
             inputs: self.input_state(),
-            events,
+            views: self.views(),
+            events: vec![],
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

@@ -35,7 +35,6 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::Native;
@@ -47,6 +46,7 @@ use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::Viewport;
 use webxr_api::Views;
 use webxr_api::Visibility;
 use winapi::shared::dxgi;
@@ -313,8 +313,6 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
-
-    needs_view_update: bool,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -810,7 +808,6 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
-            needs_view_update: false,
         })
     }
 
@@ -881,12 +878,7 @@ impl OpenXrDevice {
     }
 }
 
-impl DeviceAPI<Surface> for OpenXrDevice {
-    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
-        let translation = Vector3D::new(0.0, HEIGHT, 0.0);
-        Some(RigidTransform3D::from_translation(translation))
-    }
-
+impl OpenXrDevice {
     fn views(&self) -> Views {
         let left_view_configuration = &self.view_configurations[0];
         let right_view_configuration = &self.view_configurations[1];
@@ -983,6 +975,17 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
         Views::Stereo(left_view, right_view)
     }
+}
+
+impl DeviceAPI<Surface> for OpenXrDevice {
+    fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
+        let translation = Vector3D::new(0.0, HEIGHT, 0.0);
+        Some(RigidTransform3D::from_translation(translation))
+    }
+
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        self.views().recommended_framebuffer_resolution()
+    }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         if !self.handle_openxr_events() {
@@ -1002,8 +1005,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let mut data = self.shared_data.lock().unwrap();
-        let needs_view_update = data.frame_state.is_none() || self.needs_view_update;
-        let mut next_frame_needs_view_update = false;
         let (frame_state, secondary_active) = if self.secondary_configuration.is_some() {
             let (frame_state, secondary_state) = match self
                 .frame_waiter
@@ -1023,8 +1024,6 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             if data.secondary_view.is_some() != secondary_state.active {
                 // will be filled in later if necessary
                 data.secondary_view = None;
-                // views array has changed size
-                next_frame_needs_view_update = true;
 
                 println!(
                     "Secondary view configuration state changed to {}",
@@ -1110,16 +1109,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         data.frame_state = Some(frame_state);
         // views() needs to reacquire the lock.
         drop(data);
-
-        let events = if self.clip_planes.recently_updated() || needs_view_update {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
-
-        if next_frame_needs_view_update {
-            self.needs_view_update = true;
-        }
+        let views = self.views();
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
@@ -1140,7 +1130,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         let frame = Frame {
             transform: Some(transform),
             inputs: vec![right.frame, left.frame],
-            events,
+            events: vec![],
+            views,
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

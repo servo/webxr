@@ -6,6 +6,7 @@
 
 use euclid::Rect;
 use euclid::RigidTransform3D;
+use euclid::Size2D;
 use euclid::Transform3D;
 
 #[cfg(feature = "ipc")]
@@ -85,6 +86,21 @@ impl<Eye> Default for View<Eye> {
             projection: Transform3D::identity(),
             viewport: Default::default(),
         }
+    }
+}
+
+impl Views {
+    pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        let viewport = match *self {
+            Views::Inline => return None,
+            Views::Mono(ref view) => view.viewport,
+            Views::Stereo(ref left, ref right) => left.viewport.union(&right.viewport),
+            Views::StereoCapture(ref left, ref right, ref third_eye) => left
+                .viewport
+                .union(&right.viewport)
+                .union(&third_eye.viewport),
+        };
+        Some(Size2D::new(viewport.max_x(), viewport.max_y()))
     }
 }
 

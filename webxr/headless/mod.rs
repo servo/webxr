@@ -21,6 +21,7 @@ use webxr_api::HitTestResult;
 use webxr_api::HitTestSource;
 use webxr_api::Input;
 use webxr_api::InputFrame;
+use webxr_api::InputId;
 use webxr_api::InputSource;
 use webxr_api::MockDeviceInit;
 use webxr_api::MockDeviceMsg;
@@ -34,6 +35,7 @@ use webxr_api::Quitter;
 use webxr_api::Ray;
 use webxr_api::Receiver;
 use webxr_api::SelectEvent;
+use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session;
 use webxr_api::SessionInit;
@@ -41,9 +43,11 @@ use webxr_api::SessionMode;
 use webxr_api::Space;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::Viewport;
 use webxr_api::Views;
 
 use euclid::RigidTransform3D;
+use euclid::Size2D;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -87,7 +91,6 @@ struct HeadlessDeviceData {
     viewer_origin: Option<RigidTransform3D<f32, Viewer, Native>>,
     supported_features: Vec<String>,
     views: MockViewsInit,
-    needs_view_update: bool,
     needs_floor_update: bool,
     inputs: Vec<InputInfo>,
     sessions: Vec<PerSessionData>,
@@ -110,7 +113,6 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
             viewer_origin,
             supported_features: init.supported_features,
             views,
-            needs_view_update: false,
             needs_floor_update: false,
             inputs: vec![],
             sessions: vec![],
@@ -220,34 +222,18 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         self.data.lock().unwrap().floor_transform.clone()
     }
 
-    fn views(&self) -> Views {
-        let views = self.data.lock().unwrap().views.clone();
-        self.with_per_session(|s| {
-            if s.mode == SessionMode::Inline {
-                Views::Inline
-            } else {
-                match views {
-                    MockViewsInit::Mono(one) => Views::Mono(view(one, s.clip_planes)),
-                    MockViewsInit::Stereo(one, two) => {
-                        Views::Stereo(view(one, s.clip_planes), view(two, s.clip_planes))
-                    }
-                }
-            }
-        })
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        let d = self.data.lock().unwrap();
+        let per_session = d.sessions.iter().find(|s| s.id == self.id).unwrap();
+        d.views(&per_session).recommended_framebuffer_resolution()
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         thread::sleep(std::time::Duration::from_millis(20));
         let mut data = self.data.lock().unwrap();
-        let mut frame = data.get_frame();
+        let mut frame = data.get_frame(&data.sessions.iter().find(|s| s.id == self.id).unwrap());
         let events = self.hit_tests.commit_tests();
         frame.events = events;
-        if data.needs_view_update {
-            data.needs_view_update = false;
-            frame
-                .events
-                .push(FrameUpdateEvent::UpdateViews(self.views()))
-        };
 
         if let Some(ref world) = data.world {
             for source in self.hit_tests.tests() {
@@ -328,7 +314,7 @@ macro_rules! with_all_sessions {
 }
 
 impl HeadlessDeviceData {
-    fn get_frame(&self) -> Frame {
+    fn get_frame(&self, session: &PerSessionData) -> Frame {
         let time_ns = time::precise_time_ns();
         let transform = self.viewer_origin;
         let inputs = self
@@ -349,9 +335,33 @@ impl HeadlessDeviceData {
             transform,
             inputs,
             events: vec![],
+            views: self.views(session),
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],
+        }
+    }
+
+    fn views(&self, s: &PerSessionData) -> Views {
+        let views = self.views.clone();
+        if s.mode == SessionMode::Inline {
+            Views::Inline
+        } else {
+            match views {
+                MockViewsInit::Mono(one) => Views::Mono(view(one, s.clip_planes)),
+                MockViewsInit::Stereo(one, two) => {
+                    Views::Stereo(view(one, s.clip_planes), view(two, s.clip_planes))
+                }
+            }
+        }
+    }
+
+    fn trigger_select(&mut self, id: InputId, kind: SelectKind, event: SelectEvent) {
+        for i in 0..self.sessions.len() {
+            let frame = self.get_frame(&self.sessions[i]);
+            self.sessions[i]
+                .events
+                .callback(Event::Select(id, kind, event, frame));
         }
     }
 
@@ -368,7 +378,6 @@ impl HeadlessDeviceData {
             }
             MockDeviceMsg::SetViews(views) => {
                 self.views = views;
-                self.needs_view_update = true;
             }
             MockDeviceMsg::VisibilityChange(v) => {
                 with_all_sessions!(self, |s| s.events.callback(Event::VisibilityChange(v)))
@@ -417,54 +426,20 @@ impl HeadlessDeviceData {
                             }
                             let clicking = input.clicking;
                             input.clicking = event == SelectEvent::Start;
-                            let frame = self.get_frame();
                             match event {
                                 SelectEvent::Start => {
-                                    with_all_sessions!(self, |s| {
-                                        s.events.callback(Event::Select(
-                                            id,
-                                            kind,
-                                            event,
-                                            frame.clone(),
-                                        ))
-                                    });
+                                    self.trigger_select(id, kind, event);
                                 }
                                 SelectEvent::End => {
                                     if clicking {
-                                        with_all_sessions!(self, |s| {
-                                            s.events.callback(Event::Select(
-                                                id,
-                                                kind,
-                                                SelectEvent::Select,
-                                                frame.clone(),
-                                            ))
-                                        });
+                                        self.trigger_select(id, kind, SelectEvent::Select);
                                     } else {
-                                        with_all_sessions!(self, |s| {
-                                            s.events.callback(Event::Select(
-                                                id,
-                                                kind,
-                                                SelectEvent::End,
-                                                frame.clone(),
-                                            ))
-                                        });
+                                        self.trigger_select(id, kind, SelectEvent::End);
                                     }
                                 }
                                 SelectEvent::Select => {
-                                    with_all_sessions!(self, |s| {
-                                        s.events.callback(Event::Select(
-                                            id,
-                                            kind,
-                                            SelectEvent::Start,
-                                            frame.clone(),
-                                        ));
-                                        s.events.callback(Event::Select(
-                                            id,
-                                            kind,
-                                            SelectEvent::Select,
-                                            frame.clone(),
-                                        ))
-                                    });
+                                    self.trigger_select(id, kind, SelectEvent::Start);
+                                    self.trigger_select(id, kind, SelectEvent::Select);
                                 }
                             }
                         }

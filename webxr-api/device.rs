@@ -20,7 +20,6 @@ use crate::SessionBuilder;
 use crate::SessionInit;
 use crate::SessionMode;
 use crate::Viewport;
-use crate::Views;
 
 use euclid::RigidTransform3D;
 use euclid::Size2D;
@@ -41,23 +40,9 @@ pub trait DeviceAPI<Surface>: 'static {
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>>;
 
-    /// The transforms from viewer coordinates to the eyes, and their associated viewports.
-    fn views(&self) -> Views;
-
     /// A resolution large enough to contain all the viewports.
     /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        let viewport = match self.views() {
-            Views::Inline => return None,
-            Views::Mono(view) => view.viewport,
-            Views::Stereo(left, right) => left.viewport.union(&right.viewport),
-            Views::StereoCapture(left, right, third_eye) => left
-                .viewport
-                .union(&right.viewport)
-                .union(&third_eye.viewport),
-        };
-        Some(Size2D::new(viewport.max_x(), viewport.max_y()))
-    }
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>>;
 
     /// This method should block waiting for the next frame,
     /// and return the information for it.

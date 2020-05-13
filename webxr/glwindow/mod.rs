@@ -42,7 +42,6 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
@@ -167,10 +166,8 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         Some(RigidTransform3D::from_translation(translation))
     }
 
-    fn views(&self) -> Views {
-        let left = self.view(false);
-        let right = self.view(true);
-        Views::Stereo(left, right)
+    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        self.views().recommended_framebuffer_resolution()
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -214,15 +211,11 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
         let rotation = RigidTransform3D::from_rotation(rotation);
         let transform = Some(translation.post_transform(&rotation));
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
         Some(Frame {
             transform,
             inputs: vec![],
-            events,
+            events: vec![],
+            views: self.views(),
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],
@@ -401,6 +394,12 @@ impl GlWindowDevice {
         } else {
             Size2D::new(window_size.width / 2, window_size.height)
         }
+    }
+
+    fn views(&self) -> Views {
+        let left = self.view(false);
+        let right = self.view(true);
+        Views::Stereo(left, right)
     }
 
     fn view<Eye>(&self, is_right: bool) -> View<Eye> {

@@ -24,6 +24,9 @@ pub struct Frame {
     /// This is the inverse of the view matrix.
     pub transform: Option<RigidTransform3D<f32, Viewer, Native>>,
 
+    // The various views
+    pub views: Views,
+
     /// Frame information for each connected input source
     pub inputs: Vec<InputFrame>,
 
@@ -43,7 +46,6 @@ pub struct Frame {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum FrameUpdateEvent {
-    UpdateViews(Views),
     UpdateFloorTransform(Option<RigidTransform3D<f32, Native, Floor>>),
     HitTestSourceAdded(HitTestId),
 }

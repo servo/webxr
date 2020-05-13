@@ -16,7 +16,6 @@ use crate::Receiver;
 use crate::Sender;
 use crate::SwapChainId;
 use crate::Viewport;
-use crate::Views;
 
 use euclid::RigidTransform3D;
 use euclid::Size2D;
@@ -134,7 +133,6 @@ impl Quitter {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Session {
     floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
-    views: Views,
     resolution: Option<Size2D<i32, Viewport>>,
     sender: Sender<SessionMsg>,
     environment_blend_mode: EnvironmentBlendMode,
@@ -158,10 +156,6 @@ impl Session {
 
     pub fn initial_inputs(&self) -> &[InputSource] {
         &self.initial_inputs
-    }
-
-    pub fn views(&self) -> Views {
-        self.views.clone()
     }
 
     pub fn environment_blend_mode(&self) -> EnvironmentBlendMode {
@@ -205,7 +199,6 @@ impl Session {
 
     pub fn apply_event(&mut self, event: FrameUpdateEvent) {
         match event {
-            FrameUpdateEvent::UpdateViews(views) => self.views = views,
             FrameUpdateEvent::UpdateFloorTransform(floor) => self.floor_transform = floor,
             FrameUpdateEvent::HitTestSourceAdded(_) => (),
         }
@@ -270,7 +263,6 @@ where
 
     pub fn new_session(&mut self) -> Session {
         let floor_transform = self.device.floor_transform();
-        let views = self.device.views();
         let resolution = self.device.recommended_framebuffer_resolution();
         let sender = self.sender.clone();
         let initial_inputs = self.device.initial_inputs();
@@ -278,7 +270,6 @@ where
         let granted_features = self.device.granted_features().into();
         Session {
             floor_transform,
-            views,
             resolution,
             sender,
             initial_inputs,
