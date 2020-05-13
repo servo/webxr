@@ -313,6 +313,7 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
+    resolution: Size2D<i32, Viewport>,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -808,6 +809,7 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
+            resolution: Size2D::new(sw_width as i32, sw_height as i32),
         })
     }
 
@@ -984,7 +986,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
     }
 
     fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        self.views().recommended_framebuffer_resolution()
+        Some(self.resolution)
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
