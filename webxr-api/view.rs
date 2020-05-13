@@ -89,6 +89,15 @@ impl<Eye> Default for View<Eye> {
     }
 }
 
+impl<Eye> View<Eye> {
+    pub fn cast_unit<NewEye>(&self) -> View<NewEye> {
+        View {
+            transform: self.transform.cast_unit(),
+            projection: Transform3D::from_untyped(&self.projection.to_untyped()),
+            viewport: self.viewport.cast_unit(),
+        }
+    }
+}
 impl Views {
     pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
         let viewport = match *self {
