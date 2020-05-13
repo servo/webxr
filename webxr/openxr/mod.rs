@@ -18,10 +18,10 @@ use openxr::{
     SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
     SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
 };
-use std::{cmp, mem};
-use std::sync::{Arc, Mutex};
-use std::{thread, time::Duration};
 use std::ptr;
+use std::sync::{Arc, Mutex};
+use std::{cmp, mem};
+use std::{thread, time::Duration};
 use surfman::Adapter;
 use surfman::Device as SurfmanDevice;
 use surfman::Surface;
@@ -49,10 +49,10 @@ use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Views;
 use webxr_api::Visibility;
-use winapi::Interface;
 use winapi::shared::dxgi;
 use winapi::shared::dxgiformat;
 use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
+use winapi::Interface;
 use wio::com::ComPtr;
 
 mod input;

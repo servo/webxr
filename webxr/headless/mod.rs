@@ -69,10 +69,17 @@ struct InputInfo {
 
 struct HeadlessDevice {
     data: Arc<Mutex<HeadlessDeviceData>>,
-    mode: SessionMode,
-    clip_planes: ClipPlanes,
+    id: u32,
     hit_tests: HitTestList,
     granted_features: Vec<String>,
+}
+
+struct PerSessionData {
+    id: u32,
+    mode: SessionMode,
+    clip_planes: ClipPlanes,
+    quitter: Option<Quitter>,
+    events: EventBuffer,
 }
 
 struct HeadlessDeviceData {
@@ -83,10 +90,10 @@ struct HeadlessDeviceData {
     needs_view_update: bool,
     needs_floor_update: bool,
     inputs: Vec<InputInfo>,
-    events: EventBuffer,
-    quitter: Option<Quitter>,
+    sessions: Vec<PerSessionData>,
     disconnected: bool,
     world: Option<MockWorld>,
+    next_id: u32,
 }
 
 impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
@@ -106,10 +113,10 @@ impl MockDiscoveryAPI<SwapChains> for HeadlessMockDiscovery {
             needs_view_update: false,
             needs_floor_update: false,
             inputs: vec![],
-            events: Default::default(),
-            quitter: None,
+            sessions: vec![],
             disconnected: false,
             world: init.world,
+            next_id: 0,
         };
         let data = Arc::new(Mutex::new(data));
         let data_ = data.clone();
@@ -145,13 +152,24 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
             return Err(Error::NoMatchingDevice);
         }
         let data = self.data.clone();
-        let clip_planes = Default::default();
-        let granted_features = init.validate(mode, &data.lock().unwrap().supported_features)?;
+        let mut d = data.lock().unwrap();
+        let id = d.next_id;
+        d.next_id += 1;
+        let per_session = PerSessionData {
+            id,
+            mode,
+            clip_planes: Default::default(),
+            quitter: Default::default(),
+            events: Default::default(),
+        };
+        d.sessions.push(per_session);
+
+        let granted_features = init.validate(mode, &d.supported_features)?;
+        drop(d);
         xr.spawn(move || {
             Ok(HeadlessDevice {
                 data,
-                mode,
-                clip_planes,
+                id,
                 granted_features,
                 hit_tests: HitTestList::default(),
             })
@@ -184,23 +202,38 @@ fn view<Eye>(init: MockViewInit<Eye>, clip_planes: ClipPlanes) -> View<Eye> {
     }
 }
 
+impl HeadlessDevice {
+    fn with_per_session<R>(&self, f: impl FnOnce(&mut PerSessionData) -> R) -> R {
+        f(self
+            .data
+            .lock()
+            .unwrap()
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == self.id)
+            .unwrap())
+    }
+}
+
 impl DeviceAPI<Surface> for HeadlessDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.data.lock().unwrap().floor_transform.clone()
     }
 
     fn views(&self) -> Views {
-        if self.mode == SessionMode::Inline {
-            Views::Inline
-        } else {
-            let views = self.data.lock().unwrap().views.clone();
-            match views {
-                MockViewsInit::Mono(one) => Views::Mono(view(one, self.clip_planes)),
-                MockViewsInit::Stereo(one, two) => {
-                    Views::Stereo(view(one, self.clip_planes), view(two, self.clip_planes))
+        let views = self.data.lock().unwrap().views.clone();
+        self.with_per_session(|s| {
+            if s.mode == SessionMode::Inline {
+                Views::Inline
+            } else {
+                match views {
+                    MockViewsInit::Mono(one) => Views::Mono(view(one, s.clip_planes)),
+                    MockViewsInit::Stereo(one, two) => {
+                        Views::Stereo(view(one, s.clip_planes), view(two, s.clip_planes))
+                    }
                 }
             }
-        }
+        })
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -252,20 +285,19 @@ impl DeviceAPI<Surface> for HeadlessDevice {
     }
 
     fn set_event_dest(&mut self, dest: Sender<Event>) {
-        self.data.lock().unwrap().events.upgrade(dest)
+        self.with_per_session(|s| s.events.upgrade(dest))
     }
 
     fn quit(&mut self) {
-        self.data.lock().unwrap().events.callback(Event::SessionEnd);
+        self.with_per_session(|s| s.events.callback(Event::SessionEnd))
     }
 
     fn set_quitter(&mut self, quitter: Quitter) {
-        self.data.lock().unwrap().quitter = Some(quitter);
+        self.with_per_session(|s| s.quitter = Some(quitter))
     }
 
     fn update_clip_planes(&mut self, near: f32, far: f32) {
-        self.clip_planes.update(near, far);
-        self.data.lock().unwrap().needs_view_update = true;
+        self.with_per_session(|s| s.clip_planes.update(near, far));
     }
 
     fn granted_features(&self) -> &[String] {
@@ -285,6 +317,14 @@ impl HeadlessMockDiscovery {
     pub fn new() -> HeadlessMockDiscovery {
         HeadlessMockDiscovery {}
     }
+}
+
+macro_rules! with_all_sessions {
+    ($self:ident, |$s:ident| $e:expr) => {
+        for $s in &mut $self.sessions {
+            $e;
+        }
+    };
 }
 
 impl HeadlessDeviceData {
@@ -330,7 +370,9 @@ impl HeadlessDeviceData {
                 self.views = views;
                 self.needs_view_update = true;
             }
-            MockDeviceMsg::VisibilityChange(v) => self.events.callback(Event::VisibilityChange(v)),
+            MockDeviceMsg::VisibilityChange(v) => {
+                with_all_sessions!(self, |s| s.events.callback(Event::VisibilityChange(v)))
+            }
             MockDeviceMsg::AddInputSource(init) => {
                 self.inputs.push(InputInfo {
                     source: init.source.clone(),
@@ -339,25 +381,33 @@ impl HeadlessDeviceData {
                     active: true,
                     clicking: false,
                 });
-                self.events.callback(Event::AddInput(init.source))
+                with_all_sessions!(self, |s| s
+                    .events
+                    .callback(Event::AddInput(init.source.clone())))
             }
             MockDeviceMsg::MessageInputSource(id, msg) => {
                 if let Some(ref mut input) = self.inputs.iter_mut().find(|i| i.source.id == id) {
                     match msg {
                         MockInputMsg::SetHandedness(h) => {
                             input.source.handedness = h;
-                            self.events
-                                .callback(Event::UpdateInput(id, input.source.clone()));
+                            with_all_sessions!(self, |s| {
+                                s.events
+                                    .callback(Event::UpdateInput(id, input.source.clone()))
+                            });
                         }
                         MockInputMsg::SetProfiles(p) => {
                             input.source.profiles = p;
-                            self.events
-                                .callback(Event::UpdateInput(id, input.source.clone()));
+                            with_all_sessions!(self, |s| {
+                                s.events
+                                    .callback(Event::UpdateInput(id, input.source.clone()))
+                            });
                         }
                         MockInputMsg::SetTargetRayMode(t) => {
                             input.source.target_ray_mode = t;
-                            self.events
-                                .callback(Event::UpdateInput(id, input.source.clone()));
+                            with_all_sessions!(self, |s| {
+                                s.events
+                                    .callback(Event::UpdateInput(id, input.source.clone()))
+                            });
                         }
                         MockInputMsg::SetPointerOrigin(p) => input.pointer = p,
                         MockInputMsg::SetGripOrigin(p) => input.grip = p,
@@ -370,51 +420,68 @@ impl HeadlessDeviceData {
                             let frame = self.get_frame();
                             match event {
                                 SelectEvent::Start => {
-                                    self.events.callback(Event::Select(id, kind, event, frame));
+                                    with_all_sessions!(self, |s| {
+                                        s.events.callback(Event::Select(
+                                            id,
+                                            kind,
+                                            event,
+                                            frame.clone(),
+                                        ))
+                                    });
                                 }
                                 SelectEvent::End => {
                                     if clicking {
-                                        self.events.callback(Event::Select(
-                                            id,
-                                            kind,
-                                            SelectEvent::Select,
-                                            frame,
-                                        ));
+                                        with_all_sessions!(self, |s| {
+                                            s.events.callback(Event::Select(
+                                                id,
+                                                kind,
+                                                SelectEvent::Select,
+                                                frame.clone(),
+                                            ))
+                                        });
                                     } else {
-                                        self.events.callback(Event::Select(
-                                            id,
-                                            kind,
-                                            SelectEvent::End,
-                                            frame,
-                                        ));
+                                        with_all_sessions!(self, |s| {
+                                            s.events.callback(Event::Select(
+                                                id,
+                                                kind,
+                                                SelectEvent::End,
+                                                frame.clone(),
+                                            ))
+                                        });
                                     }
                                 }
                                 SelectEvent::Select => {
-                                    self.events.callback(Event::Select(
-                                        id,
-                                        kind,
-                                        SelectEvent::Start,
-                                        frame.clone(),
-                                    ));
-                                    self.events.callback(Event::Select(
-                                        id,
-                                        kind,
-                                        SelectEvent::Select,
-                                        frame,
-                                    ));
+                                    with_all_sessions!(self, |s| {
+                                        s.events.callback(Event::Select(
+                                            id,
+                                            kind,
+                                            SelectEvent::Start,
+                                            frame.clone(),
+                                        ));
+                                        s.events.callback(Event::Select(
+                                            id,
+                                            kind,
+                                            SelectEvent::Select,
+                                            frame.clone(),
+                                        ))
+                                    });
                                 }
                             }
                         }
                         MockInputMsg::Disconnect => {
                             if input.active {
-                                self.events.callback(Event::RemoveInput(input.source.id));
+                                with_all_sessions!(self, |s| s
+                                    .events
+                                    .callback(Event::RemoveInput(input.source.id)));
                                 input.active = false;
                                 input.clicking = false;
                             }
                         }
                         MockInputMsg::Reconnect => {
                             if !input.active {
-                                self.events.callback(Event::AddInput(input.source.clone()));
+                                with_all_sessions!(self, |s| s
+                                    .events
+                                    .callback(Event::AddInput(input.source.clone())));
                                 input.active = true;
                             }
                         }
@@ -423,7 +490,7 @@ impl HeadlessDeviceData {
             }
             MockDeviceMsg::Disconnect(s) => {
                 self.disconnected = true;
-                self.quitter.as_ref().map(|q| q.quit());
+                with_all_sessions!(self, |s| s.quitter.as_ref().map(|q| q.quit()));
                 // notify the client that we're done disconnecting
                 let _ = s.send(());
                 return false;
