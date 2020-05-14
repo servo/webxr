@@ -6,7 +6,6 @@
 
 use euclid::Rect;
 use euclid::RigidTransform3D;
-use euclid::Size2D;
 use euclid::Transform3D;
 
 #[cfg(feature = "ipc")]
@@ -76,7 +75,6 @@ pub enum Capture {}
 pub struct View<Eye> {
     pub transform: RigidTransform3D<f32, Viewer, Eye>,
     pub projection: Transform3D<f32, Eye, Display>,
-    pub viewport: Rect<i32, Viewport>,
 }
 
 impl<Eye> Default for View<Eye> {
@@ -84,7 +82,6 @@ impl<Eye> Default for View<Eye> {
         View {
             transform: RigidTransform3D::identity(),
             projection: Transform3D::identity(),
-            viewport: Default::default(),
         }
     }
 }
@@ -94,22 +91,7 @@ impl<Eye> View<Eye> {
         View {
             transform: self.transform.cast_unit(),
             projection: Transform3D::from_untyped(&self.projection.to_untyped()),
-            viewport: self.viewport.cast_unit(),
         }
-    }
-}
-impl Views {
-    pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        let viewport = match *self {
-            Views::Inline => return None,
-            Views::Mono(ref view) => view.viewport,
-            Views::Stereo(ref left, ref right) => left.viewport.union(&right.viewport),
-            Views::StereoCapture(ref left, ref right, ref third_eye) => left
-                .viewport
-                .union(&right.viewport)
-                .union(&third_eye.viewport),
-        };
-        Some(Size2D::new(viewport.max_x(), viewport.max_y()))
     }
 }
 
@@ -122,4 +104,13 @@ pub enum Views {
     Mono(View<Viewer>),
     Stereo(View<LeftEye>, View<RightEye>),
     StereoCapture(View<LeftEye>, View<RightEye>, View<Capture>),
+}
+
+/// A list of viewports per-eye in the order of fields in Views.
+///
+/// Not all must be in active use.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct Viewports {
+    pub viewports: Vec<Rect<i32, Viewport>>,
 }

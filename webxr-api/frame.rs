@@ -8,6 +8,7 @@ use crate::HitTestResult;
 use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
+use crate::Viewports;
 use crate::Views;
 
 use euclid::RigidTransform3D;
@@ -47,5 +48,6 @@ pub struct Frame {
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum FrameUpdateEvent {
     UpdateFloorTransform(Option<RigidTransform3D<f32, Native, Floor>>),
+    UpdateViewports(Viewports),
     HitTestSourceAdded(HitTestId),
 }

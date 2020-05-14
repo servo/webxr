@@ -51,6 +51,7 @@ use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 // How far off the ground are the viewer's eyes?
@@ -166,8 +167,14 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         Some(RigidTransform3D::from_translation(translation))
     }
 
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        self.views().recommended_framebuffer_resolution()
+    fn viewports(&self) -> Viewports {
+        let size = self.viewport_size();
+        Viewports {
+            viewports: vec![
+                Rect::new(Point2D::default(), size),
+                Rect::new(Point2D::new(size.width, 0), size),
+            ],
+        }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -403,10 +410,6 @@ impl GlWindowDevice {
     }
 
     fn view<Eye>(&self, is_right: bool) -> View<Eye> {
-        let viewport_size = self.viewport_size();
-        let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
-        let viewport_origin = Point2D::new(viewport_x_origin, 0);
-        let viewport = Rect::new(viewport_origin, viewport_size);
         let projection = self.perspective();
         let translation = if is_right {
             Vector3D::new(-INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
@@ -417,7 +420,6 @@ impl GlWindowDevice {
         View {
             transform,
             projection,
-            viewport,
         }
     }
 

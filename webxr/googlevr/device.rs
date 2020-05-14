@@ -18,7 +18,7 @@ use webxr_api::Sender;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
-use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 use crate::gles as gl;
@@ -402,18 +402,9 @@ impl GoogleVRDevice {
         // only translation
         let transform = decompose_rigid(&eye_mat).inverse();
 
-        let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
-        let origin = if eye == gvr::gvr_eye::GVR_LEFT_EYE {
-            Point2D::origin()
-        } else {
-            Point2D::new(self.render_size.width / 2, 0)
-        };
-        let viewport = Rect::new(origin, size);
-
         View {
             projection,
             transform,
-            viewport,
         }
     }
 
@@ -596,8 +587,14 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         Some(RigidTransform3D::identity())
     }
 
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        self.views().recommended_framebuffer_resolution()
+    fn viewports(&self) -> Viewports {
+        let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
+        Viewports {
+            viewports: vec![
+                Rect::new(Point2D::origin(), size),
+                Rect::new(Point2D::new(size.width, 0), size),
+            ],
+        }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {

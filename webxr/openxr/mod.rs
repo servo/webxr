@@ -46,7 +46,7 @@ use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
-use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 use webxr_api::Visibility;
 use winapi::shared::dxgi;
@@ -313,7 +313,6 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
-    resolution: Size2D<i32, Viewport>,
 }
 
 /// Data that is shared between the openxr thread and the
@@ -809,7 +808,6 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
-            resolution: Size2D::new(sw_width as i32, sw_height as i32),
         })
     }
 
@@ -882,33 +880,11 @@ impl OpenXrDevice {
 
 impl OpenXrDevice {
     fn views(&self) -> Views {
-        let left_view_configuration = &self.view_configurations[0];
-        let right_view_configuration = &self.view_configurations[1];
-        let left_vp = Rect::new(
-            Point2D::zero(),
-            Size2D::new(
-                left_view_configuration.recommended_image_rect_width as i32,
-                left_view_configuration.recommended_image_rect_height as i32,
-            ),
-        );
-        let right_vp = Rect::new(
-            Point2D::new(
-                left_view_configuration.recommended_image_rect_width as i32,
-                0,
-            ),
-            Size2D::new(
-                right_view_configuration.recommended_image_rect_width as i32,
-                right_view_configuration.recommended_image_rect_height as i32,
-            ),
-        );
-
         let default_views = Views::Stereo(
             View {
-                viewport: left_vp,
                 ..Default::default()
             },
             View {
-                viewport: right_vp,
                 ..Default::default()
             },
         );
@@ -936,14 +912,12 @@ impl OpenXrDevice {
         let left_view = View {
             transform: transform(&views[0].pose).inverse(),
             projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
-            viewport: left_vp,
         };
         let right_view = View {
             transform: transform(&views[1].pose).inverse(),
             projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
-            viewport: right_vp,
         };
-        if let Some(config) = self.secondary_configuration {
+        if self.secondary_configuration.is_some() {
             if data.secondary_view.is_some() {
                 let (_view_flags, views) = match self.session.locate_views(
                     ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
@@ -956,21 +930,10 @@ impl OpenXrDevice {
                         return default_views;
                     }
                 };
-                let secondary_vp = Rect::new(
-                    Point2D::new(
-                        left_view_configuration.recommended_image_rect_width as i32
-                            + right_view_configuration.recommended_image_rect_width as i32,
-                        0,
-                    ),
-                    Size2D::new(
-                        (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
-                        (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
-                    ),
-                );
+
                 let third_eye = View {
                     transform: transform(&views[0].pose).inverse(),
                     projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
-                    viewport: secondary_vp,
                 };
                 return Views::StereoCapture(left_view, right_view, third_eye);
             }
@@ -985,8 +948,42 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         Some(RigidTransform3D::from_translation(translation))
     }
 
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        Some(self.resolution)
+    fn viewports(&self) -> Viewports {
+        let left_view_configuration = &self.view_configurations[0];
+        let right_view_configuration = &self.view_configurations[1];
+        let left_vp = Rect::new(
+            Point2D::zero(),
+            Size2D::new(
+                left_view_configuration.recommended_image_rect_width as i32,
+                left_view_configuration.recommended_image_rect_height as i32,
+            ),
+        );
+        let right_vp = Rect::new(
+            Point2D::new(
+                left_view_configuration.recommended_image_rect_width as i32,
+                0,
+            ),
+            Size2D::new(
+                right_view_configuration.recommended_image_rect_width as i32,
+                right_view_configuration.recommended_image_rect_height as i32,
+            ),
+        );
+        let mut viewports = vec![left_vp, right_vp];
+        if let Some(config) = self.secondary_configuration {
+            let secondary_vp = Rect::new(
+                Point2D::new(
+                    left_view_configuration.recommended_image_rect_width as i32
+                        + right_view_configuration.recommended_image_rect_width as i32,
+                    0,
+                ),
+                Size2D::new(
+                    (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
+                    (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
+                ),
+            );
+            viewports.push(secondary_vp)
+        }
+        Viewports { viewports }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {

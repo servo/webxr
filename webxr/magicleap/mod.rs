@@ -83,6 +83,7 @@ use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 mod magicleap_c_api;
@@ -206,12 +207,10 @@ impl MagicLeapDevice {
         let left = View {
             transform: self.transform(0).inverse().pre_transform(&lerped),
             projection: self.projection(0),
-            viewport: self.viewport(0),
         };
         let right = View {
             transform: self.transform(1).inverse().pre_transform(&lerped),
             projection: self.projection(1),
-            viewport: self.viewport(1),
         };
         Views::Stereo(left, right)
     }
@@ -445,8 +444,10 @@ impl Device for MagicLeapDevice {
         })
     }
 
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
-        self.views().recommended_framebuffer_resolution()
+    fn viewports(&self) -> Viewports {
+        Viewports {
+            viewports: vec![self.viewports(0), self.viewports(1)],
+        }
     }
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {

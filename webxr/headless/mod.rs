@@ -43,11 +43,10 @@ use webxr_api::SessionMode;
 use webxr_api::Space;
 use webxr_api::View;
 use webxr_api::Viewer;
-use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 use euclid::RigidTransform3D;
-use euclid::Size2D;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -84,6 +83,7 @@ struct PerSessionData {
     clip_planes: ClipPlanes,
     quitter: Option<Quitter>,
     events: EventBuffer,
+    needs_vp_update: bool,
 }
 
 struct HeadlessDeviceData {
@@ -163,6 +163,7 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
             clip_planes: Default::default(),
             quitter: Default::default(),
             events: Default::default(),
+            needs_vp_update: false,
         };
         d.sessions.push(per_session);
 
@@ -200,7 +201,6 @@ fn view<Eye>(init: MockViewInit<Eye>, clip_planes: ClipPlanes) -> View<Eye> {
     View {
         transform: init.transform,
         projection,
-        viewport: init.viewport,
     }
 }
 
@@ -222,16 +222,23 @@ impl DeviceAPI<Surface> for HeadlessDevice {
         self.data.lock().unwrap().floor_transform.clone()
     }
 
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+    fn viewports(&self) -> Viewports {
         let d = self.data.lock().unwrap();
         let per_session = d.sessions.iter().find(|s| s.id == self.id).unwrap();
-        d.views(&per_session).recommended_framebuffer_resolution()
+        d.viewports(per_session.mode)
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
         thread::sleep(std::time::Duration::from_millis(20));
         let mut data = self.data.lock().unwrap();
         let mut frame = data.get_frame(&data.sessions.iter().find(|s| s.id == self.id).unwrap());
+        let per_session = data.sessions.iter_mut().find(|s| s.id == self.id).unwrap();
+        if per_session.needs_vp_update {
+            per_session.needs_vp_update = false;
+            let mode = per_session.mode;
+            let vp = data.viewports(mode);
+            frame.events.push(FrameUpdateEvent::UpdateViewports(vp));
+        }
         let events = self.hit_tests.commit_tests();
         frame.events = events;
 
@@ -342,6 +349,18 @@ impl HeadlessDeviceData {
         }
     }
 
+    fn viewports(&self, mode: SessionMode) -> Viewports {
+        let vec = if mode == SessionMode::Inline {
+            vec![]
+        } else {
+            match &self.views {
+                MockViewsInit::Mono(one) => vec![one.viewport],
+                MockViewsInit::Stereo(one, two) => vec![one.viewport, two.viewport],
+            }
+        };
+        Viewports { viewports: vec }
+    }
+
     fn views(&self, s: &PerSessionData) -> Views {
         let views = self.views.clone();
         if s.mode == SessionMode::Inline {
@@ -378,6 +397,9 @@ impl HeadlessDeviceData {
             }
             MockDeviceMsg::SetViews(views) => {
                 self.views = views;
+                with_all_sessions!(self, |s| {
+                    s.needs_vp_update = true;
+                })
             }
             MockDeviceMsg::VisibilityChange(v) => {
                 with_all_sessions!(self, |s| s.events.callback(Event::VisibilityChange(v)))

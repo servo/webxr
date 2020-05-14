@@ -19,10 +19,9 @@ use crate::Session;
 use crate::SessionBuilder;
 use crate::SessionInit;
 use crate::SessionMode;
-use crate::Viewport;
+use crate::Viewports;
 
 use euclid::RigidTransform3D;
-use euclid::Size2D;
 
 /// A trait for discovering XR devices
 pub trait DiscoveryAPI<SwapChains>: 'static {
@@ -40,9 +39,7 @@ pub trait DeviceAPI<Surface>: 'static {
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>>;
 
-    /// A resolution large enough to contain all the viewports.
-    /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
-    fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>>;
+    fn viewports(&self) -> Viewports;
 
     /// This method should block waiting for the next frame,
     /// and return the information for it.

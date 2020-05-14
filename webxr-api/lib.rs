@@ -97,6 +97,7 @@ pub use view::RightEye;
 pub use view::View;
 pub use view::Viewer;
 pub use view::Viewport;
+pub use view::Viewports;
 pub use view::Views;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
