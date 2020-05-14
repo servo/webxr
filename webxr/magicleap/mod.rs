@@ -204,13 +204,12 @@ impl MagicLeapDevice {
 
 impl MagicLeapDevice {
     fn views(&self) -> Views {
-        let lerped = self.lerp_transforms();
         let left = View {
-            transform: self.transform(0).inverse().pre_transform(&lerped),
+            transform: self.transform(0),
             projection: self.projection(0),
         };
         let right = View {
-            transform: self.transform(1).inverse().pre_transform(&lerped),
+            transform: self.transform(1),
             projection: self.projection(1),
         };
         Views::Stereo(left, right)

@@ -192,7 +192,11 @@ impl DiscoveryAPI<SwapChains> for HeadlessDiscovery {
     }
 }
 
-fn view<Eye>(init: MockViewInit<Eye>, clip_planes: ClipPlanes) -> View<Eye> {
+fn view<Eye>(
+    init: MockViewInit<Eye>,
+    viewer: RigidTransform3D<f32, Viewer, Native>,
+    clip_planes: ClipPlanes,
+) -> View<Eye> {
     let projection = if let Some((l, r, t, b)) = init.fov {
         util::fov_to_projection_matrix(l, r, t, b, clip_planes)
     } else {
@@ -200,7 +204,7 @@ fn view<Eye>(init: MockViewInit<Eye>, clip_planes: ClipPlanes) -> View<Eye> {
     };
 
     View {
-        transform: init.transform,
+        transform: viewer.pre_transform(&init.transform.inverse()),
         projection,
     }
 }
@@ -322,11 +326,24 @@ macro_rules! with_all_sessions {
 }
 
 impl HeadlessDeviceData {
-    fn get_frame(&self, session: &PerSessionData) -> Frame {
+    fn get_frame(&self, s: &PerSessionData) -> Frame {
         let time_ns = time::precise_time_ns();
-        let pose = self.viewer_origin.map(|transform| ViewerPose {
-            transform,
-            views: self.views(session),
+        let views = self.views.clone();
+
+        let pose = self.viewer_origin.map(|transform| {
+            let views = if s.mode == SessionMode::Inline {
+                Views::Inline
+            } else {
+                match views {
+                    MockViewsInit::Mono(one) => Views::Mono(view(one, transform, s.clip_planes)),
+                    MockViewsInit::Stereo(one, two) => Views::Stereo(
+                        view(one, transform, s.clip_planes),
+                        view(two, transform, s.clip_planes),
+                    ),
+                }
+            };
+
+            ViewerPose { transform, views }
         });
         let inputs = self
             .inputs
@@ -362,20 +379,6 @@ impl HeadlessDeviceData {
             }
         };
         Viewports { viewports: vec }
-    }
-
-    fn views(&self, s: &PerSessionData) -> Views {
-        let views = self.views.clone();
-        if s.mode == SessionMode::Inline {
-            Views::Inline
-        } else {
-            match views {
-                MockViewsInit::Mono(one) => Views::Mono(view(one, s.clip_planes)),
-                MockViewsInit::Stereo(one, two) => {
-                    Views::Stereo(view(one, s.clip_planes), view(two, s.clip_planes))
-                }
-            }
-        }
     }
 
     fn trigger_select(&mut self, id: InputId, kind: SelectKind, event: SelectEvent) {

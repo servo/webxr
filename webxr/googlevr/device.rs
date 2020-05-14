@@ -384,24 +384,30 @@ impl GoogleVRDevice {
         self.presenting = false;
     }
 
-    fn views(&self) -> Views {
+    fn views(&self, viewer: RigidTransform3D<f32, Viewer, Native>) -> Views {
         unsafe {
-            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
-            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
+            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, viewer, self.left_eye_vp);
+            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, viewer, self.right_eye_vp);
             Views::Stereo(left_view, right_view)
         }
     }
 
-    unsafe fn fetch_eye<T>(&self, eye: gvr::gvr_eye, vp: *mut gvr::gvr_buffer_viewport) -> View<T> {
+    unsafe fn fetch_eye<Eye>(
+        &self,
+        eye: gvr::gvr_eye,
+        viewer: RigidTransform3D<f32, Viewer, Native>,
+        vp: *mut gvr::gvr_buffer_viewport,
+    ) -> View<Eye> {
         let eye_fov = gvr::gvr_buffer_viewport_get_source_fov(vp);
         let projection = fov_to_projection_matrix(&eye_fov, self.clip_planes);
 
         // this matrix converts from head space to eye space,
-        // i.e. it's the inverse of the offset
         let eye_mat = gvr::gvr_get_eye_from_head_matrix(self.ctx, eye as i32);
         // XXXManishearth we should decompose the matrix properly instead of assuming it's
         // only translation
-        let transform = decompose_rigid(&eye_mat).inverse();
+        let transform: RigidTransform3D<f32, Viewer, Eye> = decompose_rigid(&eye_mat);
+
+        let transform = viewer.pre_transform(&transform.inverse());
 
         View {
             projection,
@@ -605,10 +611,11 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         let time_ns = time::precise_time_ns();
 
         // Predict head matrix
+        let transform = self.fetch_head_matrix();
         Some(Frame {
             pose: Some(ViewerPose {
-                transform: self.fetch_head_matrix(),
-                views: self.views(),
+                transform,
+                views: self.views(transform),
             }),
             inputs: self.input_state(),
             events: vec![],

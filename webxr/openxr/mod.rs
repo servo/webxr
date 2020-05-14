@@ -907,61 +907,20 @@ impl OpenXrDevice {
 }
 
 impl OpenXrDevice {
-    fn views(&self) -> Views {
-        let default_views = Views::Stereo(
-            View {
-                ..Default::default()
-            },
-            View {
-                ..Default::default()
-            },
-        );
-
-        let data = self.shared_data.lock().unwrap();
-        let frame_state = if let Some(ref fs) = data.frame_state {
-            fs
-        } else {
-            // This data isn't accessed till the first frame, so it
-            // doesn't really matter what it is right now
-            return default_views;
-        };
-
-        let (_view_flags, views) = match self.session.locate_views(
-            ViewConfigurationType::PRIMARY_STEREO,
-            frame_state.predicted_display_time,
-            &self.viewer_space,
-        ) {
-            Ok(data) => data,
-            Err(e) => {
-                error!("Error locating views: {:?}", e);
-                return default_views;
-            }
-        };
+    fn views(&self, data: &SharedData) -> Views {
         let left_view = View {
-            transform: transform(&views[0].pose).inverse(),
-            projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
+            transform: transform(&data.left.view.pose),
+            projection: fov_to_projection_matrix(&data.left.view.fov, self.clip_planes),
         };
         let right_view = View {
-            transform: transform(&views[1].pose).inverse(),
-            projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
+            transform: transform(&data.right.view.pose),
+            projection: fov_to_projection_matrix(&data.right.view.fov, self.clip_planes),
         };
         if self.secondary_configuration.is_some() {
-            if data.secondary.is_some() {
-                let (_view_flags, views) = match self.session.locate_views(
-                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
-                    frame_state.predicted_display_time,
-                    &self.viewer_space,
-                ) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("Error locating views: {:?}", e);
-                        return default_views;
-                    }
-                };
-
+            if let Some(ref secondary) = data.secondary {
                 let third_eye = View {
-                    transform: transform(&views[0].pose).inverse(),
-                    projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
+                    transform: transform(&secondary.view.pose),
+                    projection: fov_to_projection_matrix(&secondary.view.fov, self.clip_planes),
                 };
                 return Views::StereoCapture(left_view, right_view, third_eye);
             }
@@ -1147,9 +1106,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .frame(&self.session, &frame_state, &data.space, &transform);
 
         data.frame_state = Some(frame_state);
-        // views() needs to reacquire the lock.
-        drop(data);
-        let views = self.views();
+        let views = self.views(&data);
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());

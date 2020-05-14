@@ -65,15 +65,15 @@ pub enum Input {}
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Capture {}
 
-/// For each eye, the transform from the viewer to that eye,
-/// its projection onto its display, and its display viewport.
+/// For each eye, the pose of that eye,
+/// its projection onto its display.
 /// For stereo displays, we have a `View<LeftEye>` and a `View<RightEye>`.
-/// For mono displays, we hagve a `View<Viewer>` (where the transform is the identity).
+/// For mono displays, we hagve a `View<Viewer>`
 /// https://immersive-web.github.io/webxr/#xrview
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct View<Eye> {
-    pub transform: RigidTransform3D<f32, Viewer, Eye>,
+    pub transform: RigidTransform3D<f32, Eye, Native>,
     pub projection: Transform3D<f32, Eye, Display>,
 }
 

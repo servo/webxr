@@ -50,6 +50,7 @@ use webxr_api::Session;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::Viewer;
 use webxr_api::ViewerPose;
 use webxr_api::Viewport;
 use webxr_api::Viewports;
@@ -222,7 +223,7 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         Some(Frame {
             pose: Some(ViewerPose {
                 transform,
-                views: self.views(),
+                views: self.views(transform),
             }),
             inputs: vec![],
             events: vec![],
@@ -406,22 +407,27 @@ impl GlWindowDevice {
         }
     }
 
-    fn views(&self) -> Views {
-        let left = self.view(false);
-        let right = self.view(true);
+    fn views(&self, viewer: RigidTransform3D<f32, Viewer, Native>) -> Views {
+        let left = self.view(viewer, false);
+        let right = self.view(viewer, true);
         Views::Stereo(left, right)
     }
 
-    fn view<Eye>(&self, is_right: bool) -> View<Eye> {
+    fn view<Eye>(
+        &self,
+        viewer: RigidTransform3D<f32, Viewer, Native>,
+        is_right: bool,
+    ) -> View<Eye> {
         let projection = self.perspective();
         let translation = if is_right {
             Vector3D::new(-INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
         } else {
             Vector3D::new(INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
         };
-        let transform = RigidTransform3D::from_translation(translation);
+        let transform: RigidTransform3D<f32, Viewer, Eye> =
+            RigidTransform3D::from_translation(translation);
         View {
-            transform,
+            transform: viewer.pre_transform(&transform.inverse()),
             projection,
         }
     }
