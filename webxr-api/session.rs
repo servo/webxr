@@ -170,6 +170,8 @@ impl Session {
 
     /// A resolution large enough to contain all the viewports.
     /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
+    ///
+    /// Returns None if the session is inline
     pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
         self.viewports()
             .iter()

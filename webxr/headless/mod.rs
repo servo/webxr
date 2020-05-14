@@ -43,6 +43,7 @@ use webxr_api::SessionMode;
 use webxr_api::Space;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::ViewerPose;
 use webxr_api::Viewports;
 use webxr_api::Views;
 
@@ -323,7 +324,10 @@ macro_rules! with_all_sessions {
 impl HeadlessDeviceData {
     fn get_frame(&self, session: &PerSessionData) -> Frame {
         let time_ns = time::precise_time_ns();
-        let transform = self.viewer_origin;
+        let pose = self.viewer_origin.map(|transform| ViewerPose {
+            transform,
+            views: self.views(session),
+        });
         let inputs = self
             .inputs
             .iter()
@@ -339,10 +343,9 @@ impl HeadlessDeviceData {
             .collect();
 
         Frame {
-            transform,
+            pose,
             inputs,
             events: vec![],
-            views: self.views(session),
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

@@ -82,6 +82,7 @@ use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::ViewerPose;
 use webxr_api::Viewport;
 use webxr_api::Viewports;
 use webxr_api::Views;
@@ -426,7 +427,7 @@ impl Device for MagicLeapDevice {
         }
         let time_ns = time::precise_time_ns();
 
-        let transform = Some(self.lerp_transforms());
+        let transform = self.lerp_transforms();
         let inputs = Vec::new();
         let events = if self.view_update_needed {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
@@ -434,10 +435,12 @@ impl Device for MagicLeapDevice {
             vec![]
         };
         Some(Frame {
-            transform,
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(),
+            }),
             inputs,
             events,
-            views: self.views(),
             time_ns,
             sent_time: 0,
             hit_test_result: vec![],

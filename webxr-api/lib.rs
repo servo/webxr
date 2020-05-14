@@ -35,6 +35,7 @@ pub use events::Visibility;
 
 pub use frame::Frame;
 pub use frame::FrameUpdateEvent;
+pub use frame::ViewerPose;
 
 pub use hand::Finger;
 pub use hand::FingerJoint;

@@ -18,6 +18,7 @@ use webxr_api::Sender;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::ViewerPose;
 use webxr_api::Viewports;
 use webxr_api::Views;
 
@@ -605,9 +606,11 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
 
         // Predict head matrix
         Some(Frame {
-            transform: Some(self.fetch_head_matrix()),
+            pose: Some(ViewerPose {
+                transform: self.fetch_head_matrix(),
+                views: self.views(),
+            }),
             inputs: self.input_state(),
-            views: self.views(),
             events: vec![],
             time_ns,
             sent_time: 0,

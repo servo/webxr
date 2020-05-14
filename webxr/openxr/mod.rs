@@ -46,6 +46,7 @@ use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::ViewerPose;
 use webxr_api::Viewports;
 use webxr_api::Views;
 use webxr_api::Visibility;
@@ -1127,10 +1128,9 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let frame = Frame {
-            transform: Some(transform),
+            pose: Some(ViewerPose { transform, views }),
             inputs: vec![right.frame, left.frame],
             events: vec![],
-            views,
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

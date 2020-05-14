@@ -50,6 +50,7 @@ use webxr_api::Session;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::ViewerPose;
 use webxr_api::Viewport;
 use webxr_api::Viewports;
 use webxr_api::Views;
@@ -217,12 +218,14 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             RigidTransform3D::from_translation(translation);
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
         let rotation = RigidTransform3D::from_rotation(rotation);
-        let transform = Some(translation.post_transform(&rotation));
+        let transform = translation.post_transform(&rotation);
         Some(Frame {
-            transform,
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(),
+            }),
             inputs: vec![],
             events: vec![],
-            views: self.views(),
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],
