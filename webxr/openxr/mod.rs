@@ -28,8 +28,10 @@ use surfman::Surface;
 use surfman_chains::SurfaceProvider;
 use webxr_api;
 use webxr_api::util::{self, ClipPlanes};
+use webxr_api::Capture;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
+use webxr_api::Display;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
@@ -37,8 +39,10 @@ use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
+use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::RightEye;
 use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
@@ -125,9 +129,38 @@ pub enum ContextMenuResult {
     Pending,
 }
 
-struct ViewInfo {
+struct ViewInfo<Eye> {
     view: openxr::View,
     extent: Extent2Di,
+    cached_projection: Transform3D<f32, Eye, Display>,
+}
+
+impl<Eye> ViewInfo<Eye> {
+    fn set_view(&mut self, view: openxr::View, clip_planes: ClipPlanes) {
+        self.view.pose = view.pose;
+        if self.view.fov.angle_left != view.fov.angle_left
+            || self.view.fov.angle_right != view.fov.angle_right
+            || self.view.fov.angle_up != view.fov.angle_up
+            || self.view.fov.angle_down != view.fov.angle_down
+        {
+            // It's fine if this happens occasionally, but if this happening very
+            // often we should stop caching
+            warn!("FOV changed, updating projection matrices");
+            self.view.fov = view.fov;
+            self.recompute_projection(clip_planes);
+        }
+    }
+
+    fn recompute_projection(&mut self, clip_planes: ClipPlanes) {
+        self.cached_projection = fov_to_projection_matrix(&self.view.fov, clip_planes);
+    }
+
+    fn view(&self) -> View<Eye> {
+        View {
+            transform: transform(&self.view.pose),
+            projection: self.cached_projection,
+        }
+    }
 }
 
 impl Drop for OpenXrDevice {
@@ -348,9 +381,9 @@ struct OpenXrDevice {
 /// Data that is shared between the openxr thread and the
 /// surface provider that runs in the webgl thread.
 struct SharedData {
-    left: ViewInfo,
-    right: ViewInfo,
-    secondary: Option<ViewInfo>,
+    left: ViewInfo<LeftEye>,
+    right: ViewInfo<RightEye>,
+    secondary: Option<ViewInfo<Capture>>,
     frame_state: Option<FrameState>,
     frame_stream: FrameStream<D3D11>,
     space: Space,
@@ -784,10 +817,12 @@ impl OpenXrDevice {
         let left = ViewInfo {
             view: VIEW_INIT,
             extent: left_extent,
+            cached_projection: Transform3D::identity(),
         };
         let right = ViewInfo {
             view: VIEW_INIT,
             extent: right_extent,
+            cached_projection: Transform3D::identity(),
         };
         let shared_data = Arc::new(Mutex::new(SharedData {
             frame_stream,
@@ -908,20 +943,11 @@ impl OpenXrDevice {
 
 impl OpenXrDevice {
     fn views(&self, data: &SharedData) -> Views {
-        let left_view = View {
-            transform: transform(&data.left.view.pose),
-            projection: fov_to_projection_matrix(&data.left.view.fov, self.clip_planes),
-        };
-        let right_view = View {
-            transform: transform(&data.right.view.pose),
-            projection: fov_to_projection_matrix(&data.right.view.fov, self.clip_planes),
-        };
+        let left_view = data.left.view();
+        let right_view = data.right.view();
         if self.secondary_configuration.is_some() {
             if let Some(ref secondary) = data.secondary {
-                let third_eye = View {
-                    transform: transform(&secondary.view.pose),
-                    projection: fov_to_projection_matrix(&secondary.view.fov, self.clip_planes),
-                };
+                let third_eye = secondary.view();
                 return Views::StereoCapture(left_view, right_view, third_eye);
             }
         }
@@ -1019,6 +1045,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                     Some(ViewInfo {
                         view: VIEW_INIT,
                         extent,
+                        cached_projection: Transform3D::identity(),
                     })
                 } else {
                     None
@@ -1060,8 +1087,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 return None;
             }
         };
-        data.left.view = views[0];
-        data.right.view = views[1];
+        data.left.set_view(views[0], self.clip_planes);
+        data.right.set_view(views[1], self.clip_planes);
         let pose = match self
             .viewer_space
             .locate(&data.space, frame_state.predicted_display_time)
@@ -1088,7 +1115,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                     return None;
                 }
             };
-            info.view = view;
+            info.set_view(view, self.clip_planes);
         }
 
         let active_action_set = ActiveActionSet::new(&self.action_set);

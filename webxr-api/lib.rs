@@ -89,6 +89,7 @@ pub use space::ApiSpace;
 pub use space::BaseSpace;
 pub use space::Space;
 
+pub use view::Capture;
 pub use view::Display;
 pub use view::Floor;
 pub use view::Input;
