@@ -2,7 +2,7 @@ use euclid::RigidTransform3D;
 use openxr::d3d::D3D11;
 use openxr::{
     self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandTracker,
-    Instance, Path, Posef, Quaternionf, Session, Space, SpaceLocationFlags, Vector3f,
+    Instance, Path, Posef, Session, Space, SpaceLocationFlags,
 };
 use webxr_api::Finger;
 use webxr_api::Hand;
@@ -16,6 +16,8 @@ use webxr_api::Native;
 use webxr_api::SelectEvent;
 use webxr_api::TargetRayMode;
 use webxr_api::Viewer;
+
+use super::IDENTITY_POSE;
 
 /// Number of frames to wait with the menu gesture before
 /// opening the menu.
@@ -72,19 +74,6 @@ impl ClickState {
     }
 }
 
-const IDENTITY_POSE: Posef = Posef {
-    orientation: Quaternionf {
-        x: 0.,
-        y: 0.,
-        z: 0.,
-        w: 1.,
-    },
-    position: Vector3f {
-        x: 0.,
-        y: 0.,
-        z: 0.,
-    },
-};
 pub struct OpenXRInput {
     id: InputId,
     action_aim_pose: Action<Posef>,
