@@ -82,7 +82,9 @@ use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::ViewerPose;
 use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 mod magicleap_c_api;
@@ -201,6 +203,18 @@ impl MagicLeapDevice {
 }
 
 impl MagicLeapDevice {
+    fn views(&self) -> Views {
+        let left = View {
+            transform: self.transform(0),
+            projection: self.projection(0),
+        };
+        let right = View {
+            transform: self.transform(1),
+            projection: self.projection(1),
+        };
+        Views::Stereo(left, right)
+    }
+
     fn start_frame(&mut self) -> Result<(), MLResult> {
         if !self.in_frame {
             debug!("Starting frame");
@@ -412,7 +426,7 @@ impl Device for MagicLeapDevice {
         }
         let time_ns = time::precise_time_ns();
 
-        let transform = Some(self.lerp_transforms());
+        let transform = self.lerp_transforms();
         let inputs = Vec::new();
         let events = if self.view_update_needed {
             vec![FrameUpdateEvent::UpdateViews(self.views())]
@@ -420,13 +434,22 @@ impl Device for MagicLeapDevice {
             vec![]
         };
         Some(Frame {
-            transform,
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(),
+            }),
             inputs,
             events,
             time_ns,
             sent_time: 0,
             hit_test_result: vec![],
         })
+    }
+
+    fn viewports(&self) -> Viewports {
+        Viewports {
+            viewports: vec![self.viewports(0), self.viewports(1)],
+        }
     }
 
     fn render_animation_frame(&mut self, surface: Surface) -> Surface {
@@ -448,21 +471,6 @@ impl Device for MagicLeapDevice {
         self.surfman_device
             .destroy_surface_texture(&mut self.surfman_context, surface_texture)
             .unwrap()
-    }
-
-    fn views(&self) -> Views {
-        let lerped = self.lerp_transforms();
-        let left = View {
-            transform: self.transform(0).inverse().pre_transform(&lerped),
-            projection: self.projection(0),
-            viewport: self.viewport(0),
-        };
-        let right = View {
-            transform: self.transform(1).inverse().pre_transform(&lerped),
-            projection: self.projection(1),
-            viewport: self.viewport(1),
-        };
-        Views::Stereo(left, right)
     }
 
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {

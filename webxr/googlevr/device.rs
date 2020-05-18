@@ -9,7 +9,6 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputFrame;
 use webxr_api::InputId;
 use webxr_api::InputSource;
@@ -19,6 +18,8 @@ use webxr_api::Sender;
 use webxr_api::TargetRayMode;
 use webxr_api::View;
 use webxr_api::Viewer;
+use webxr_api::ViewerPose;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 use crate::gles as gl;
@@ -383,29 +384,34 @@ impl GoogleVRDevice {
         self.presenting = false;
     }
 
-    unsafe fn fetch_eye<T>(&self, eye: gvr::gvr_eye, vp: *mut gvr::gvr_buffer_viewport) -> View<T> {
+    fn views(&self, viewer: RigidTransform3D<f32, Viewer, Native>) -> Views {
+        unsafe {
+            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, viewer, self.left_eye_vp);
+            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, viewer, self.right_eye_vp);
+            Views::Stereo(left_view, right_view)
+        }
+    }
+
+    unsafe fn fetch_eye<Eye>(
+        &self,
+        eye: gvr::gvr_eye,
+        viewer: RigidTransform3D<f32, Viewer, Native>,
+        vp: *mut gvr::gvr_buffer_viewport,
+    ) -> View<Eye> {
         let eye_fov = gvr::gvr_buffer_viewport_get_source_fov(vp);
         let projection = fov_to_projection_matrix(&eye_fov, self.clip_planes);
 
         // this matrix converts from head space to eye space,
-        // i.e. it's the inverse of the offset
         let eye_mat = gvr::gvr_get_eye_from_head_matrix(self.ctx, eye as i32);
         // XXXManishearth we should decompose the matrix properly instead of assuming it's
         // only translation
-        let transform = decompose_rigid(&eye_mat).inverse();
+        let transform: RigidTransform3D<f32, Viewer, Eye> = decompose_rigid(&eye_mat);
 
-        let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
-        let origin = if eye == gvr::gvr_eye::GVR_LEFT_EYE {
-            Point2D::origin()
-        } else {
-            Point2D::new(self.render_size.width / 2, 0)
-        };
-        let viewport = Rect::new(origin, size);
+        let transform = viewer.pre_transform(&transform.inverse());
 
         View {
             projection,
             transform,
-            viewport,
         }
     }
 
@@ -588,11 +594,13 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
         Some(RigidTransform3D::identity())
     }
 
-    fn views(&self) -> Views {
-        unsafe {
-            let left_view = self.fetch_eye(gvr::gvr_eye::GVR_LEFT_EYE, self.left_eye_vp);
-            let right_view = self.fetch_eye(gvr::gvr_eye::GVR_RIGHT_EYE, self.right_eye_vp);
-            Views::Stereo(left_view, right_view)
+    fn viewports(&self) -> Viewports {
+        let size = Size2D::new(self.render_size.width / 2, self.render_size.height);
+        Viewports {
+            viewports: vec![
+                Rect::new(Point2D::origin(), size),
+                Rect::new(Point2D::new(size.width, 0), size),
+            ],
         }
     }
 
@@ -601,16 +609,16 @@ impl DeviceAPI<Surface> for GoogleVRDevice {
             self.acquire_frame();
         }
         let time_ns = time::precise_time_ns();
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
+
         // Predict head matrix
+        let transform = self.fetch_head_matrix();
         Some(Frame {
-            transform: Some(self.fetch_head_matrix()),
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(transform),
+            }),
             inputs: self.input_state(),
-            events,
+            events: vec![],
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

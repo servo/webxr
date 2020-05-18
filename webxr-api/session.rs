@@ -16,8 +16,9 @@ use crate::Receiver;
 use crate::Sender;
 use crate::SwapChainId;
 use crate::Viewport;
-use crate::Views;
+use crate::Viewports;
 
+use euclid::Rect;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
 
@@ -134,8 +135,7 @@ impl Quitter {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct Session {
     floor_transform: Option<RigidTransform3D<f32, Native, Floor>>,
-    views: Views,
-    resolution: Option<Size2D<i32, Viewport>>,
+    viewports: Viewports,
     sender: Sender<SessionMsg>,
     environment_blend_mode: EnvironmentBlendMode,
     initial_inputs: Vec<InputSource>,
@@ -160,17 +160,25 @@ impl Session {
         &self.initial_inputs
     }
 
-    pub fn views(&self) -> Views {
-        self.views.clone()
-    }
-
     pub fn environment_blend_mode(&self) -> EnvironmentBlendMode {
         self.environment_blend_mode
     }
 
-    pub fn recommended_framebuffer_resolution(&self) -> Size2D<i32, Viewport> {
-        self.resolution
-            .expect("Inline XR sessions should not construct a framebuffer")
+    pub fn viewports(&self) -> &[Rect<i32, Viewport>] {
+        &self.viewports.viewports
+    }
+
+    /// A resolution large enough to contain all the viewports.
+    /// https://immersive-web.github.io/webxr/#native-webgl-framebuffer-resolution
+    ///
+    /// Returns None if the session is inline
+    pub fn recommended_framebuffer_resolution(&self) -> Option<Size2D<i32, Viewport>> {
+        self.viewports()
+            .iter()
+            .fold(None::<Rect<_, _>>, |acc, vp| {
+                Some(acc.map(|a| a.union(vp)).unwrap_or(*vp))
+            })
+            .map(|rect| Size2D::new(rect.max_x(), rect.max_y()))
     }
 
     pub fn set_swap_chain(&mut self, swap_chain_id: Option<SwapChainId>) {
@@ -205,8 +213,8 @@ impl Session {
 
     pub fn apply_event(&mut self, event: FrameUpdateEvent) {
         match event {
-            FrameUpdateEvent::UpdateViews(views) => self.views = views,
             FrameUpdateEvent::UpdateFloorTransform(floor) => self.floor_transform = floor,
+            FrameUpdateEvent::UpdateViewports(vp) => self.viewports = vp,
             FrameUpdateEvent::HitTestSourceAdded(_) => (),
         }
     }
@@ -270,16 +278,14 @@ where
 
     pub fn new_session(&mut self) -> Session {
         let floor_transform = self.device.floor_transform();
-        let views = self.device.views();
-        let resolution = self.device.recommended_framebuffer_resolution();
+        let viewports = self.device.viewports();
         let sender = self.sender.clone();
         let initial_inputs = self.device.initial_inputs();
         let environment_blend_mode = self.device.environment_blend_mode();
         let granted_features = self.device.granted_features().into();
         Session {
             floor_transform,
-            views,
-            resolution,
+            viewports,
             sender,
             initial_inputs,
             environment_blend_mode,

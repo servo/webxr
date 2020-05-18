@@ -18,28 +18,31 @@ use openxr::{
     SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
     SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
 };
-use std::{cmp, mem};
-use std::sync::{Arc, Mutex};
-use std::{thread, time::Duration};
 use std::ptr;
+use std::sync::{Arc, Mutex};
+use std::{cmp, mem};
+use std::{thread, time::Duration};
 use surfman::Adapter;
 use surfman::Device as SurfmanDevice;
 use surfman::Surface;
 use surfman_chains::SurfaceProvider;
 use webxr_api;
 use webxr_api::util::{self, ClipPlanes};
+use webxr_api::Capture;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
+use webxr_api::Display;
 use webxr_api::Error;
 use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputId;
 use webxr_api::InputSource;
+use webxr_api::LeftEye;
 use webxr_api::Native;
 use webxr_api::Quitter;
+use webxr_api::RightEye;
 use webxr_api::SelectKind;
 use webxr_api::Sender;
 use webxr_api::Session as WebXrSession;
@@ -47,18 +50,44 @@ use webxr_api::SessionId;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::ViewerPose;
+use webxr_api::Viewports;
 use webxr_api::Views;
 use webxr_api::Visibility;
-use winapi::Interface;
 use winapi::shared::dxgi;
 use winapi::shared::dxgiformat;
 use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
+use winapi::Interface;
 use wio::com::ComPtr;
 
 mod input;
 use input::OpenXRInput;
 
 const HEIGHT: f32 = 1.4;
+
+const IDENTITY_POSE: Posef = Posef {
+    orientation: Quaternionf {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+        w: 1.,
+    },
+    position: Vector3f {
+        x: 0.,
+        y: 0.,
+        z: 0.,
+    },
+};
+
+const VIEW_INIT: openxr::View = openxr::View {
+    pose: IDENTITY_POSE,
+    fov: Fovf {
+        angle_left: 0.,
+        angle_right: 0.,
+        angle_up: 0.,
+        angle_down: 0.,
+    },
+};
 
 // Whether or not the secondary view is enabled
 // Disabled by default to reduce texture sizes
@@ -98,6 +127,40 @@ pub enum ContextMenuResult {
     Dismissed,
     /// User has not acted on dialog
     Pending,
+}
+
+struct ViewInfo<Eye> {
+    view: openxr::View,
+    extent: Extent2Di,
+    cached_projection: Transform3D<f32, Eye, Display>,
+}
+
+impl<Eye> ViewInfo<Eye> {
+    fn set_view(&mut self, view: openxr::View, clip_planes: ClipPlanes) {
+        self.view.pose = view.pose;
+        if self.view.fov.angle_left != view.fov.angle_left
+            || self.view.fov.angle_right != view.fov.angle_right
+            || self.view.fov.angle_up != view.fov.angle_up
+            || self.view.fov.angle_down != view.fov.angle_down
+        {
+            // It's fine if this happens occasionally, but if this happening very
+            // often we should stop caching
+            warn!("FOV changed, updating projection matrices");
+            self.view.fov = view.fov;
+            self.recompute_projection(clip_planes);
+        }
+    }
+
+    fn recompute_projection(&mut self, clip_planes: ClipPlanes) {
+        self.cached_projection = fov_to_projection_matrix(&self.view.fov, clip_planes);
+    }
+
+    fn view(&self) -> View<Eye> {
+        View {
+            transform: transform(&self.view.pose),
+            projection: self.cached_projection,
+        }
+    }
 }
 
 impl Drop for OpenXrDevice {
@@ -313,20 +376,16 @@ struct OpenXrDevice {
     granted_features: Vec<String>,
     context_menu_provider: Box<dyn ContextMenuProvider>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
-
-    needs_view_update: bool,
 }
 
 /// Data that is shared between the openxr thread and the
 /// surface provider that runs in the webgl thread.
 struct SharedData {
-    openxr_views: Vec<openxr::View>,
+    left: ViewInfo<LeftEye>,
+    right: ViewInfo<RightEye>,
+    secondary: Option<ViewInfo<Capture>>,
     frame_state: Option<FrameState>,
     frame_stream: FrameStream<D3D11>,
-    left_extent: Extent2Di,
-    right_extent: Extent2Di,
-    secondary_data: Option<(Extent2Di, EnvironmentBlendMode)>,
-    secondary_view: Option<openxr::View>,
     space: Space,
 }
 
@@ -338,6 +397,7 @@ struct OpenXrProvider {
     shared_data: Arc<Mutex<SharedData>>,
     fake_surface: Option<Surface>,
     blend_mode: EnvironmentBlendMode,
+    secondary_blend_mode: Option<EnvironmentBlendMode>,
 }
 
 // This is required due to the presence of the swapchain image
@@ -356,14 +416,14 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
         }
 
         // Invert the up/down angles so that openxr flips the texture in the y axis.
-        let mut l_fov = data.openxr_views[0].fov;
-        let mut r_fov = data.openxr_views[1].fov;
+        let mut l_fov = data.left.view.fov;
+        let mut r_fov = data.right.view.fov;
         std::mem::swap(&mut l_fov.angle_up, &mut l_fov.angle_down);
         std::mem::swap(&mut r_fov.angle_up, &mut r_fov.angle_down);
 
         let views = [
             openxr::CompositionLayerProjectionView::new()
-                .pose(data.openxr_views[0].pose)
+                .pose(data.left.view.pose)
                 .fov(l_fov)
                 .sub_image(
                     openxr::SwapchainSubImage::new()
@@ -371,11 +431,11 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
                         .image_array_index(0)
                         .image_rect(openxr::Rect2Di {
                             offset: openxr::Offset2Di { x: 0, y: 0 },
-                            extent: data.left_extent,
+                            extent: data.left.extent,
                         }),
                 ),
             openxr::CompositionLayerProjectionView::new()
-                .pose(data.openxr_views[1].pose)
+                .pose(data.right.view.pose)
                 .fov(r_fov)
                 .sub_image(
                     openxr::SwapchainSubImage::new()
@@ -383,10 +443,10 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
                         .image_array_index(0)
                         .image_rect(openxr::Rect2Di {
                             offset: openxr::Offset2Di {
-                                x: data.left_extent.width,
+                                x: data.left.extent.width,
                                 y: 0,
                             },
-                            extent: data.right_extent,
+                            extent: data.right.extent,
                         }),
                 ),
         ];
@@ -396,14 +456,14 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
             .layer_flags(CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
             .views(&views[..])];
 
-        if let Some(secondary_view) = data.secondary_view {
-            let mut s_fov = secondary_view.fov;
-            let (secondary_extent, secondary_blend_mode) = data
-                .secondary_data
-                .expect("secondary data must be set if secondary views are enabled");
+        if let Some(ref secondary) = data.secondary {
+            let mut s_fov = secondary.view.fov;
+            let secondary_blend_mode = self
+                .secondary_blend_mode
+                .expect("secondary blend mode must be set if secondary views are enabled");
             std::mem::swap(&mut s_fov.angle_up, &mut s_fov.angle_down);
             let views = [openxr::CompositionLayerProjectionView::new()
-                .pose(secondary_view.pose)
+                .pose(secondary.view.pose)
                 .fov(s_fov)
                 .sub_image(
                     openxr::SwapchainSubImage::new()
@@ -411,10 +471,10 @@ impl SurfaceProvider<SurfmanDevice> for OpenXrProvider {
                         .image_array_index(0)
                         .image_rect(openxr::Rect2Di {
                             offset: openxr::Offset2Di {
-                                x: data.left_extent.width + data.right_extent.width,
+                                x: data.left.extent.width + data.right.extent.width,
                                 y: 0,
                             },
-                            extent: secondary_extent,
+                            extent: secondary.extent,
                         }),
                 )];
 
@@ -684,7 +744,7 @@ impl OpenXrDevice {
         let mut sw_width = left_view_configuration.recommended_image_rect_width
             + right_view_configuration.recommended_image_rect_width;
         let mut sw_height = left_view_configuration.recommended_image_rect_height;
-        let (secondary_configuration, secondary_data) = if supports_secondary {
+        let (secondary_configuration, secondary_blend_mode) = if supports_secondary {
             let view_configuration = *instance
                 .enumerate_view_configuration_views(
                     system,
@@ -700,12 +760,7 @@ impl OpenXrDevice {
                 .expect(
                     "Session::enumerate_view_configuration_views() returned no secondary views",
                 );
-            let extent = Extent2Di {
-                width: (view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE)
-                    as i32,
-                height: (view_configuration.recommended_image_rect_height
-                    / SECONDARY_VIEW_DOWNSCALE) as i32,
-            };
+
             sw_width += view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE;
             sw_height = cmp::max(
                 sw_height,
@@ -722,10 +777,7 @@ impl OpenXrDevice {
                         e
                     ))
                 })?[0];
-            (
-                Some(view_configuration),
-                Some((extent, secondary_blend_mode)),
-            )
+            (Some(view_configuration), Some(secondary_blend_mode))
         } else {
             (None, None)
         };
@@ -762,15 +814,23 @@ impl OpenXrDevice {
             surfaces.push(None);
         }
 
+        let left = ViewInfo {
+            view: VIEW_INIT,
+            extent: left_extent,
+            cached_projection: Transform3D::identity(),
+        };
+        let right = ViewInfo {
+            view: VIEW_INIT,
+            extent: right_extent,
+            cached_projection: Transform3D::identity(),
+        };
         let shared_data = Arc::new(Mutex::new(SharedData {
             frame_stream,
             frame_state: None,
             space,
-            openxr_views: vec![],
-            secondary_view: None,
-            left_extent,
-            right_extent,
-            secondary_data,
+            left,
+            right,
+            secondary: None,
         }));
 
         let provider = Box::new(OpenXrProvider {
@@ -781,6 +841,7 @@ impl OpenXrDevice {
             fake_surface: None,
             shared_data: shared_data.clone(),
             blend_mode,
+            secondary_blend_mode,
         });
         provider_registration.register(id, provider);
         // Ensure the webgl thread is blocked until we're done initializing
@@ -810,7 +871,6 @@ impl OpenXrDevice {
             granted_features,
             context_menu_provider,
             context_menu_future: None,
-            needs_view_update: false,
         })
     }
 
@@ -881,13 +941,27 @@ impl OpenXrDevice {
     }
 }
 
+impl OpenXrDevice {
+    fn views(&self, data: &SharedData) -> Views {
+        let left_view = data.left.view();
+        let right_view = data.right.view();
+        if self.secondary_configuration.is_some() {
+            if let Some(ref secondary) = data.secondary {
+                let third_eye = secondary.view();
+                return Views::StereoCapture(left_view, right_view, third_eye);
+            }
+        }
+        Views::Stereo(left_view, right_view)
+    }
+}
+
 impl DeviceAPI<Surface> for OpenXrDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         let translation = Vector3D::new(0.0, HEIGHT, 0.0);
         Some(RigidTransform3D::from_translation(translation))
     }
 
-    fn views(&self) -> Views {
+    fn viewports(&self) -> Viewports {
         let left_view_configuration = &self.view_configurations[0];
         let right_view_configuration = &self.view_configurations[1];
         let left_vp = Rect::new(
@@ -907,81 +981,22 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 right_view_configuration.recommended_image_rect_height as i32,
             ),
         );
-
-        let default_views = Views::Stereo(
-            View {
-                viewport: left_vp,
-                ..Default::default()
-            },
-            View {
-                viewport: right_vp,
-                ..Default::default()
-            },
-        );
-
-        let data = self.shared_data.lock().unwrap();
-        let frame_state = if let Some(ref fs) = data.frame_state {
-            fs
-        } else {
-            // This data isn't accessed till the first frame, so it
-            // doesn't really matter what it is right now
-            return default_views;
-        };
-
-        let (_view_flags, views) = match self.session.locate_views(
-            ViewConfigurationType::PRIMARY_STEREO,
-            frame_state.predicted_display_time,
-            &self.viewer_space,
-        ) {
-            Ok(data) => data,
-            Err(e) => {
-                error!("Error locating views: {:?}", e);
-                return default_views;
-            }
-        };
-        let left_view = View {
-            transform: transform(&views[0].pose).inverse(),
-            projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
-            viewport: left_vp,
-        };
-        let right_view = View {
-            transform: transform(&views[1].pose).inverse(),
-            projection: fov_to_projection_matrix(&views[1].fov, self.clip_planes),
-            viewport: right_vp,
-        };
+        let mut viewports = vec![left_vp, right_vp];
         if let Some(config) = self.secondary_configuration {
-            if data.secondary_view.is_some() {
-                let (_view_flags, views) = match self.session.locate_views(
-                    ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
-                    frame_state.predicted_display_time,
-                    &self.viewer_space,
-                ) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("Error locating views: {:?}", e);
-                        return default_views;
-                    }
-                };
-                let secondary_vp = Rect::new(
-                    Point2D::new(
-                        left_view_configuration.recommended_image_rect_width as i32
-                            + right_view_configuration.recommended_image_rect_width as i32,
-                        0,
-                    ),
-                    Size2D::new(
-                        (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
-                        (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
-                    ),
-                );
-                let third_eye = View {
-                    transform: transform(&views[0].pose).inverse(),
-                    projection: fov_to_projection_matrix(&views[0].fov, self.clip_planes),
-                    viewport: secondary_vp,
-                };
-                return Views::StereoCapture(left_view, right_view, third_eye);
-            }
+            let secondary_vp = Rect::new(
+                Point2D::new(
+                    left_view_configuration.recommended_image_rect_width as i32
+                        + right_view_configuration.recommended_image_rect_width as i32,
+                    0,
+                ),
+                Size2D::new(
+                    (config.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE) as i32,
+                    (config.recommended_image_rect_height / SECONDARY_VIEW_DOWNSCALE) as i32,
+                ),
+            );
+            viewports.push(secondary_vp)
         }
-        Views::Stereo(left_view, right_view)
+        Viewports { viewports }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -1002,9 +1017,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let mut data = self.shared_data.lock().unwrap();
-        let needs_view_update = data.frame_state.is_none() || self.needs_view_update;
-        let mut next_frame_needs_view_update = false;
-        let (frame_state, secondary_active) = if self.secondary_configuration.is_some() {
+        let frame_state = if let Some(secondary_configuration) = self.secondary_configuration {
             let (frame_state, secondary_state) = match self
                 .frame_waiter
                 .wait_secondary(ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT)
@@ -1020,11 +1033,23 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 secondary_state.ty,
                 ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT
             );
-            if data.secondary_view.is_some() != secondary_state.active {
-                // will be filled in later if necessary
-                data.secondary_view = None;
-                // views array has changed size
-                next_frame_needs_view_update = true;
+
+            if data.secondary.is_some() != secondary_state.active {
+                let extent = Extent2Di {
+                    width: (secondary_configuration.recommended_image_rect_width
+                        / SECONDARY_VIEW_DOWNSCALE) as i32,
+                    height: (secondary_configuration.recommended_image_rect_height
+                        / SECONDARY_VIEW_DOWNSCALE) as i32,
+                };
+                data.secondary = if secondary_state.active {
+                    Some(ViewInfo {
+                        view: VIEW_INIT,
+                        extent,
+                        cached_projection: Transform3D::identity(),
+                    })
+                } else {
+                    None
+                };
 
                 println!(
                     "Secondary view configuration state changed to {}",
@@ -1032,18 +1057,15 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 );
             }
 
-            (frame_state, secondary_state.active)
+            frame_state
         } else {
-            (
-                match self.frame_waiter.wait() {
-                    Ok(frame_state) => frame_state,
-                    Err(e) => {
-                        error!("Error waiting on frame: {:?}", e);
-                        return None;
-                    }
-                },
-                false,
-            )
+            match self.frame_waiter.wait() {
+                Ok(frame_state) => frame_state,
+                Err(e) => {
+                    error!("Error waiting on frame: {:?}", e);
+                    return None;
+                }
+            }
         };
 
         let time_ns = time::precise_time_ns();
@@ -1065,7 +1087,8 @@ impl DeviceAPI<Surface> for OpenXrDevice {
                 return None;
             }
         };
-        data.openxr_views = views;
+        data.left.set_view(views[0], self.clip_planes);
+        data.right.set_view(views[1], self.clip_planes);
         let pose = match self
             .viewer_space
             .locate(&data.space, frame_state.predicted_display_time)
@@ -1078,19 +1101,21 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         };
         let transform = transform(&pose.pose);
 
-        if secondary_active {
-            let (_view_flags, views) = match self.session.locate_views(
+        // the following code does a split borrow, which only works on actual references
+        let data_ = &mut *data;
+        if let Some(ref mut info) = data_.secondary {
+            let view = match self.session.locate_views(
                 ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
                 frame_state.predicted_display_time,
-                &data.space,
+                &data_.space,
             ) {
-                Ok(data) => data,
+                Ok(v) => v.1[0],
                 Err(e) => {
                     error!("Error locating views: {:?}", e);
                     return None;
                 }
             };
-            data.secondary_view = Some(views[0]);
+            info.set_view(view, self.clip_planes);
         }
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
@@ -1108,18 +1133,7 @@ impl DeviceAPI<Surface> for OpenXrDevice {
             .frame(&self.session, &frame_state, &data.space, &transform);
 
         data.frame_state = Some(frame_state);
-        // views() needs to reacquire the lock.
-        drop(data);
-
-        let events = if self.clip_planes.recently_updated() || needs_view_update {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
-
-        if next_frame_needs_view_update {
-            self.needs_view_update = true;
-        }
+        let views = self.views(&data);
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
@@ -1138,9 +1152,9 @@ impl DeviceAPI<Surface> for OpenXrDevice {
         }
 
         let frame = Frame {
-            transform: Some(transform),
+            pose: Some(ViewerPose { transform, views }),
             inputs: vec![right.frame, left.frame],
-            events,
+            events: vec![],
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],

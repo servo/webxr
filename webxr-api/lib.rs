@@ -35,6 +35,7 @@ pub use events::Visibility;
 
 pub use frame::Frame;
 pub use frame::FrameUpdateEvent;
+pub use frame::ViewerPose;
 
 pub use hand::Finger;
 pub use hand::FingerJoint;
@@ -88,6 +89,7 @@ pub use space::ApiSpace;
 pub use space::BaseSpace;
 pub use space::Space;
 
+pub use view::Capture;
 pub use view::Display;
 pub use view::Floor;
 pub use view::Input;
@@ -97,6 +99,7 @@ pub use view::RightEye;
 pub use view::View;
 pub use view::Viewer;
 pub use view::Viewport;
+pub use view::Viewports;
 pub use view::Views;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

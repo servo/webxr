@@ -65,17 +65,16 @@ pub enum Input {}
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub enum Capture {}
 
-/// For each eye, the transform from the viewer to that eye,
-/// its projection onto its display, and its display viewport.
+/// For each eye, the pose of that eye,
+/// its projection onto its display.
 /// For stereo displays, we have a `View<LeftEye>` and a `View<RightEye>`.
-/// For mono displays, we hagve a `View<Viewer>` (where the transform is the identity).
+/// For mono displays, we hagve a `View<Viewer>`
 /// https://immersive-web.github.io/webxr/#xrview
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct View<Eye> {
-    pub transform: RigidTransform3D<f32, Viewer, Eye>,
+    pub transform: RigidTransform3D<f32, Eye, Native>,
     pub projection: Transform3D<f32, Eye, Display>,
-    pub viewport: Rect<i32, Viewport>,
 }
 
 impl<Eye> Default for View<Eye> {
@@ -83,7 +82,15 @@ impl<Eye> Default for View<Eye> {
         View {
             transform: RigidTransform3D::identity(),
             projection: Transform3D::identity(),
-            viewport: Default::default(),
+        }
+    }
+}
+
+impl<Eye> View<Eye> {
+    pub fn cast_unit<NewEye>(&self) -> View<NewEye> {
+        View {
+            transform: self.transform.cast_unit(),
+            projection: Transform3D::from_untyped(&self.projection.to_untyped()),
         }
     }
 }
@@ -97,4 +104,13 @@ pub enum Views {
     Mono(View<Viewer>),
     Stereo(View<LeftEye>, View<RightEye>),
     StereoCapture(View<LeftEye>, View<RightEye>, View<Capture>),
+}
+
+/// A list of viewports per-eye in the order of fields in Views.
+///
+/// Not all must be in active use.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct Viewports {
+    pub viewports: Vec<Rect<i32, Viewport>>,
 }

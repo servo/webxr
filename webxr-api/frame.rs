@@ -8,6 +8,7 @@ use crate::HitTestResult;
 use crate::InputFrame;
 use crate::Native;
 use crate::Viewer;
+use crate::Viewports;
 use crate::Views;
 
 use euclid::RigidTransform3D;
@@ -18,12 +19,8 @@ use euclid::RigidTransform3D;
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub struct Frame {
-    /// The transform from the viewer to native coordinates
-    ///
-    /// This is equivalent to the pose of the viewer in native coordinates.
-    /// This is the inverse of the view matrix.
-    pub transform: Option<RigidTransform3D<f32, Viewer, Native>>,
-
+    /// The pose information of the viewer
+    pub pose: Option<ViewerPose>,
     /// Frame information for each connected input source
     pub inputs: Vec<InputFrame>,
 
@@ -43,7 +40,20 @@ pub struct Frame {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum FrameUpdateEvent {
-    UpdateViews(Views),
     UpdateFloorTransform(Option<RigidTransform3D<f32, Native, Floor>>),
+    UpdateViewports(Viewports),
     HitTestSourceAdded(HitTestId),
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
+pub struct ViewerPose {
+    /// The transform from the viewer to native coordinates
+    ///
+    /// This is equivalent to the pose of the viewer in native coordinates.
+    /// This is the inverse of the view matrix.
+    pub transform: RigidTransform3D<f32, Viewer, Native>,
+
+    // The various views
+    pub views: Views,
 }

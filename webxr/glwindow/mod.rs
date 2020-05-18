@@ -42,7 +42,6 @@ use webxr_api::Event;
 use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
 use webxr_api::InputSource;
 use webxr_api::Native;
 use webxr_api::Quitter;
@@ -51,7 +50,10 @@ use webxr_api::Session;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
+use webxr_api::Viewer;
+use webxr_api::ViewerPose;
 use webxr_api::Viewport;
+use webxr_api::Viewports;
 use webxr_api::Views;
 
 // How far off the ground are the viewer's eyes?
@@ -167,10 +169,14 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         Some(RigidTransform3D::from_translation(translation))
     }
 
-    fn views(&self) -> Views {
-        let left = self.view(false);
-        let right = self.view(true);
-        Views::Stereo(left, right)
+    fn viewports(&self) -> Viewports {
+        let size = self.viewport_size();
+        Viewports {
+            viewports: vec![
+                Rect::new(Point2D::default(), size),
+                Rect::new(Point2D::new(size.width, 0), size),
+            ],
+        }
     }
 
     fn wait_for_animation_frame(&mut self) -> Option<Frame> {
@@ -213,16 +219,14 @@ impl DeviceAPI<Surface> for GlWindowDevice {
             RigidTransform3D::from_translation(translation);
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
         let rotation = RigidTransform3D::from_rotation(rotation);
-        let transform = Some(translation.post_transform(&rotation));
-        let events = if self.clip_planes.recently_updated() {
-            vec![FrameUpdateEvent::UpdateViews(self.views())]
-        } else {
-            vec![]
-        };
+        let transform = translation.post_transform(&rotation);
         Some(Frame {
-            transform,
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(transform),
+            }),
             inputs: vec![],
-            events,
+            events: vec![],
             time_ns,
             sent_time: 0,
             hit_test_results: vec![],
@@ -403,22 +407,28 @@ impl GlWindowDevice {
         }
     }
 
-    fn view<Eye>(&self, is_right: bool) -> View<Eye> {
-        let viewport_size = self.viewport_size();
-        let viewport_x_origin = if is_right { viewport_size.width } else { 0 };
-        let viewport_origin = Point2D::new(viewport_x_origin, 0);
-        let viewport = Rect::new(viewport_origin, viewport_size);
+    fn views(&self, viewer: RigidTransform3D<f32, Viewer, Native>) -> Views {
+        let left = self.view(viewer, false);
+        let right = self.view(viewer, true);
+        Views::Stereo(left, right)
+    }
+
+    fn view<Eye>(
+        &self,
+        viewer: RigidTransform3D<f32, Viewer, Native>,
+        is_right: bool,
+    ) -> View<Eye> {
         let projection = self.perspective();
         let translation = if is_right {
             Vector3D::new(-INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
         } else {
             Vector3D::new(INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
         };
-        let transform = RigidTransform3D::from_translation(translation);
+        let transform: RigidTransform3D<f32, Viewer, Eye> =
+            RigidTransform3D::from_translation(translation);
         View {
-            transform,
+            transform: viewer.pre_transform(&transform.inverse()),
             projection,
-            viewport,
         }
     }
 
