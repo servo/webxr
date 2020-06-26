@@ -122,28 +122,23 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                 let depth_stencil_texture = None;
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
-                let offset = Point2D::new(surface_size.width / 2, 0);
-                let view_size = Size2D::new(surface_size.width / 2, surface_size.height);
                 let sub_image = Some(SubImage {
                     color_texture,
                     depth_stencil_texture,
                     texture_array_index,
                     viewport: Rect::new(origin, surface_size),
                 });
-                let view_sub_images = vec![
-                    SubImage {
+                let view_sub_images = self
+                    .viewports
+                    .viewports
+                    .iter()
+                    .map(|&viewport| SubImage {
                         color_texture,
                         depth_stencil_texture,
                         texture_array_index,
-                        viewport: Rect::new(origin, view_size),
-                    },
-                    SubImage {
-                        color_texture,
-                        depth_stencil_texture,
-                        texture_array_index,
-                        viewport: Rect::new(offset, view_size),
-                    },
-                ];
+                        viewport,
+                    })
+                    .collect();
                 self.textures.insert(layer_id, surface_texture);
                 Ok(SubImages {
                     layer_id,

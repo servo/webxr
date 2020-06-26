@@ -99,17 +99,31 @@ pub use space::BaseSpace;
 pub use space::Space;
 
 pub use view::Capture;
+pub use view::CubeBack;
+pub use view::CubeBottom;
+pub use view::CubeLeft;
+pub use view::CubeRight;
+pub use view::CubeTop;
 pub use view::Display;
 pub use view::Floor;
 pub use view::Input;
 pub use view::LeftEye;
 pub use view::Native;
 pub use view::RightEye;
+pub use view::SomeEye;
 pub use view::View;
 pub use view::Viewer;
 pub use view::Viewport;
 pub use view::Viewports;
 pub use view::Views;
+pub use view::CUBE_BACK;
+pub use view::CUBE_BOTTOM;
+pub use view::CUBE_LEFT;
+pub use view::CUBE_RIGHT;
+pub use view::CUBE_TOP;
+pub use view::LEFT_EYE;
+pub use view::RIGHT_EYE;
+pub use view::VIEWER;
 
 #[cfg(feature = "ipc")]
 use std::thread;
