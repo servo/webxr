@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::SessionBuilder;
-use crate::SwapChains;
+use crate::SurfmanGL;
+use crate::SurfmanLayerManager;
 
 use euclid::Angle;
 use euclid::Point2D;
@@ -15,25 +15,29 @@ use euclid::Transform3D;
 use euclid::UnknownUnit;
 use euclid::Vector3D;
 
-use gleam::gl;
-use gleam::gl::GLuint;
-use gleam::gl::Gl;
+use sparkle::gl;
+use sparkle::gl::GLuint;
+use sparkle::gl::Gl;
 
 use std::ffi::c_void;
 use std::rc::Rc;
 
 use surfman::Adapter;
 use surfman::Connection;
-use surfman::Context;
+use surfman::Context as SurfmanContext;
 use surfman::ContextAttributes;
 use surfman::Device as SurfmanDevice;
 use surfman::GLApi;
 use surfman::NativeWidget;
-use surfman::Surface;
 use surfman::SurfaceAccess;
 use surfman::SurfaceType;
 
+use surfman_chains::SwapChainAPI;
+use surfman_chains::SwapChains;
+use surfman_chains::SwapChainsAPI;
+
 use webxr_api::util::ClipPlanes;
+use webxr_api::ContextId;
 use webxr_api::DeviceAPI;
 use webxr_api::DiscoveryAPI;
 use webxr_api::Display;
@@ -43,10 +47,15 @@ use webxr_api::EventBuffer;
 use webxr_api::Floor;
 use webxr_api::Frame;
 use webxr_api::InputSource;
+use webxr_api::LayerGrandManager;
+use webxr_api::LayerId;
+use webxr_api::LayerInit;
+use webxr_api::LayerManager;
 use webxr_api::Native;
 use webxr_api::Quitter;
 use webxr_api::Sender;
 use webxr_api::Session;
+use webxr_api::SessionBuilder;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
 use webxr_api::View;
@@ -119,12 +128,12 @@ impl GlWindowDiscovery {
     }
 }
 
-impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
+impl DiscoveryAPI<SurfmanGL> for GlWindowDiscovery {
     fn request_session(
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder,
+        xr: SessionBuilder<SurfmanGL>,
     ) -> Result<Session, Error> {
         if self.supports_session(mode) {
             let granted_features = init.validate(mode, &["local-floor".into()])?;
@@ -132,13 +141,14 @@ impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
             let adapter = self.adapter.clone();
             let context_attributes = self.context_attributes.clone();
             let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
-            xr.run_on_main_thread(move || {
+            xr.run_on_main_thread(move |grand_manager| {
                 GlWindowDevice::new(
                     connection,
                     adapter,
                     context_attributes,
                     window,
                     granted_features,
+                    grand_manager,
                 )
             })
         } else {
@@ -153,9 +163,12 @@ impl DiscoveryAPI<SwapChains> for GlWindowDiscovery {
 
 pub struct GlWindowDevice {
     device: SurfmanDevice,
-    context: Context,
-    gl: Rc<dyn Gl>,
+    context: SurfmanContext,
+    gl: Rc<Gl>,
     window: Box<dyn GlWindow>,
+    grand_manager: LayerGrandManager<SurfmanGL>,
+    layer_manager: Option<LayerManager>,
+    swap_chains: SwapChains<LayerId, SurfmanDevice>,
     read_fbo: GLuint,
     events: EventBuffer,
     clip_planes: ClipPlanes,
@@ -163,7 +176,7 @@ pub struct GlWindowDevice {
     shader: Option<GlWindowShader>,
 }
 
-impl DeviceAPI<Surface> for GlWindowDevice {
+impl DeviceAPI for GlWindowDevice {
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         let translation = Vector3D::new(0.0, HEIGHT, 0.0);
         Some(RigidTransform3D::from_translation(translation))
@@ -179,14 +192,88 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         }
     }
 
-    fn wait_for_animation_frame(&mut self) -> Option<Frame> {
-        debug_assert_eq!(
-            (
-                self.gl.get_error(),
-                self.gl.check_frame_buffer_status(gl::FRAMEBUFFER)
-            ),
-            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
-        );
+    fn create_layer(&mut self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error> {
+        self.layer_manager()?.create_layer(context_id, init)
+    }
+
+    fn destroy_layer(&mut self, context_id: ContextId, layer_id: LayerId) {
+        self.layer_manager()
+            .unwrap()
+            .destroy_layer(context_id, layer_id)
+    }
+
+    fn begin_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) -> Option<Frame> {
+        log::debug!("Begin animation frame for layers {:?}", layers);
+        let time_ns = time::precise_time_ns();
+        let translation = Vector3D::from_untyped(self.window.get_translation());
+        let translation: RigidTransform3D<_, _, Native> =
+            RigidTransform3D::from_translation(translation);
+        let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
+        let rotation = RigidTransform3D::from_rotation(rotation);
+        let transform = translation.post_transform(&rotation);
+        let sub_images = self.layer_manager().ok()?.begin_frame(layers).ok()?;
+        Some(Frame {
+            pose: Some(ViewerPose {
+                transform,
+                views: self.views(transform),
+            }),
+            inputs: vec![],
+            events: vec![],
+            time_ns,
+            sub_images,
+            sent_time: 0,
+            hit_test_results: vec![],
+        })
+    }
+
+    fn end_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) {
+        log::debug!("End animation frame for layers {:?}", layers);
+        self.device.make_context_current(&self.context).unwrap();
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        let _ = self.layer_manager().unwrap().end_frame(layers);
+
+        self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
+        self.gl.clear(gl::COLOR_BUFFER_BIT);
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+        for &(_, layer_id) in layers {
+            let swap_chain = match self.swap_chains.get(layer_id) {
+                Some(swap_chain) => swap_chain,
+                None => continue,
+            };
+            let surface = match swap_chain.take_surface() {
+                Some(surface) => surface,
+                None => return,
+            };
+            let texture_size = self.device.surface_info(&surface).size;
+            let surface_texture = self
+                .device
+                .create_surface_texture(&mut self.context, surface)
+                .unwrap();
+            let texture_id = self.device.surface_texture_object(&surface_texture);
+            let texture_target = self.device.surface_gl_texture_target();
+
+            log::debug!("Presenting texture {}", texture_id);
+            if let Some(ref shader) = self.shader {
+                shader.draw_texture(
+                    texture_id,
+                    texture_target,
+                    texture_size,
+                    self.viewport_size(),
+                );
+            } else {
+                self.blit_texture(texture_id, texture_target, texture_size);
+            }
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
+            let surface = self
+                .device
+                .destroy_surface_texture(&mut self.context, surface_texture)
+                .unwrap();
+            swap_chain.recycle_surface(surface);
+        }
+
         let mut surface = self
             .device
             .unbind_surface_from_context(&mut self.context)
@@ -209,57 +296,10 @@ impl DeviceAPI<Surface> for GlWindowDevice {
         debug_assert_eq!(
             (
                 self.gl.get_error(),
-                self.gl.check_frame_buffer_status(gl::FRAMEBUFFER)
+                self.gl.check_framebuffer_status(gl::FRAMEBUFFER)
             ),
             (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
         );
-        let time_ns = time::precise_time_ns();
-        let translation = Vector3D::from_untyped(self.window.get_translation());
-        let translation: RigidTransform3D<_, _, Native> =
-            RigidTransform3D::from_translation(translation);
-        let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
-        let rotation = RigidTransform3D::from_rotation(rotation);
-        let transform = translation.post_transform(&rotation);
-        Some(Frame {
-            pose: Some(ViewerPose {
-                transform,
-                views: self.views(transform),
-            }),
-            inputs: vec![],
-            events: vec![],
-            time_ns,
-            sent_time: 0,
-            hit_test_results: vec![],
-        })
-    }
-
-    fn render_animation_frame(&mut self, surface: Surface) -> Surface {
-        self.device.make_context_current(&self.context).unwrap();
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        let viewport_size = self.viewport_size();
-        let texture_size = self.device.surface_info(&surface).size;
-        let surface_texture = self
-            .device
-            .create_surface_texture(&mut self.context, surface)
-            .unwrap();
-        let texture_id = self.device.surface_texture_object(&surface_texture);
-        let texture_target = self.device.surface_gl_texture_target();
-
-        self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
-        self.gl.clear(gl::COLOR_BUFFER_BIT);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        if let Some(ref shader) = self.shader {
-            shader.draw_texture(texture_id, texture_target, texture_size, viewport_size);
-        } else {
-            self.blit_texture(texture_id, texture_target, texture_size, viewport_size);
-        }
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
-
-        self.device
-            .destroy_surface_texture(&mut self.context, surface_texture)
-            .unwrap()
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -303,12 +343,13 @@ impl GlWindowDevice {
         context_attributes: ContextAttributes,
         window: Box<dyn GlWindow>,
         granted_features: Vec<String>,
+        grand_manager: LayerGrandManager<SurfmanGL>,
     ) -> Result<GlWindowDevice, Error> {
         let mut device = connection.create_device(&adapter).unwrap();
         let context_descriptor = device
             .create_context_descriptor(&context_attributes)
             .unwrap();
-        let mut context = device.create_context(&context_descriptor).unwrap();
+        let mut context = device.create_context(&context_descriptor, None).unwrap();
         let native_widget = window.get_native_widget(&device);
         let surface_type = SurfaceType::Widget { native_widget };
         let surface = device
@@ -320,10 +361,12 @@ impl GlWindowDevice {
             .unwrap();
 
         let gl = match device.gl_api() {
-            GLApi::GL => unsafe { gl::GlFns::load_with(|s| device.get_proc_address(&context, s)) },
-            GLApi::GLES => unsafe {
-                gl::GlesFns::load_with(|s| device.get_proc_address(&context, s))
-            },
+            GLApi::GL => Gl::gl_fns(gl::ffi_gl::Gl::load_with(|symbol_name| {
+                device.get_proc_address(&context, symbol_name)
+            })),
+            GLApi::GLES => Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|symbol_name| {
+                device.get_proc_address(&context, symbol_name)
+            })),
         };
         let read_fbo = gl.gen_framebuffers(1)[0];
         let framebuffer_object = device
@@ -333,12 +376,12 @@ impl GlWindowDevice {
             .unwrap_or(0);
         gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
         debug_assert_eq!(
-            (
-                gl.get_error(),
-                gl.check_frame_buffer_status(gl::FRAMEBUFFER)
-            ),
+            (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
             (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
         );
+
+        let swap_chains = SwapChains::new();
+        let layer_manager = None;
 
         let shader = GlWindowShader::new(gl.clone(), window.get_mode());
         debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
@@ -349,6 +392,9 @@ impl GlWindowDevice {
             device,
             context,
             read_fbo,
+            swap_chains,
+            grand_manager,
+            layer_manager,
             events: Default::default(),
             clip_planes: Default::default(),
             granted_features,
@@ -361,8 +407,8 @@ impl GlWindowDevice {
         texture_id: GLuint,
         texture_target: GLuint,
         texture_size: Size2D<i32, UnknownUnit>,
-        viewport_size: Size2D<i32, Viewport>,
     ) {
+        let viewport_size = self.viewport_size();
         self.gl
             .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
         self.gl.framebuffer_texture_2d(
@@ -384,6 +430,19 @@ impl GlWindowDevice {
             gl::COLOR_BUFFER_BIT,
             gl::NEAREST,
         );
+    }
+
+    fn layer_manager(&mut self) -> Result<&mut LayerManager, Error> {
+        if let Some(ref mut manager) = self.layer_manager {
+            return Ok(manager);
+        }
+        let swap_chains = self.swap_chains.clone();
+        let viewports = self.viewports();
+        let layer_manager = self.grand_manager.create_layer_manager(move |_, _| {
+            Ok(SurfmanLayerManager::new(viewports, swap_chains))
+        })?;
+        self.layer_manager = Some(layer_manager);
+        Ok(self.layer_manager.as_mut().unwrap())
     }
 
     fn viewport_size(&self) -> Size2D<i32, Viewport> {
@@ -436,11 +495,11 @@ impl GlWindowDevice {
         let near = self.clip_planes.near;
         let far = self.clip_planes.far;
         // https://gith<ub.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
-        let size = self.viewport_size();
         let fov_up = Angle::degrees(FOV_UP);
         let f = 1.0 / fov_up.radians.tan();
         let nf = 1.0 / (near - far);
-        let aspect = size.width as f32 / size.height as f32;
+        let viewport_size = self.viewport_size();
+        let aspect = viewport_size.width as f32 / viewport_size.height as f32;
 
         // Dear rustfmt, This is a 4x4 matrix, please leave it alone. Best, ajeffrey.
         {
@@ -457,7 +516,7 @@ impl GlWindowDevice {
 }
 
 struct GlWindowShader {
-    gl: Rc<dyn Gl>,
+    gl: Rc<Gl>,
     buffer: GLuint,
     vao: GLuint,
     program: GLuint,
@@ -518,7 +577,7 @@ const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &[u8] = b"
 ";
 
 impl GlWindowShader {
-    fn new(gl: Rc<dyn Gl>, mode: GlWindowMode) -> Option<GlWindowShader> {
+    fn new(gl: Rc<Gl>, mode: GlWindowMode) -> Option<GlWindowShader> {
         // The shader source
         let (vertex_source, fragment_source) = match mode {
             GlWindowMode::Blit => {
@@ -541,12 +600,14 @@ impl GlWindowShader {
         let buffer = gl.gen_buffers(1)[0];
         let vao = gl.gen_vertex_arrays(1)[0];
         gl.bind_buffer(gl::ARRAY_BUFFER, buffer);
-        gl.buffer_data_untyped(
-            gl::ARRAY_BUFFER,
-            std::mem::size_of_val(VERTICES) as isize,
-            VERTICES as *const _ as *const c_void,
-            gl::STATIC_DRAW,
-        );
+        unsafe {
+            gl.buffer_data(
+                gl::ARRAY_BUFFER,
+                std::mem::size_of_val(VERTICES) as isize,
+                VERTICES as *const _ as *const c_void,
+                gl::STATIC_DRAW,
+            )
+        };
         gl.bind_vertex_array(vao);
         gl.vertex_attrib_pointer(
             VERTEX_ATTRIBUTE,

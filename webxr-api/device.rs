@@ -4,6 +4,7 @@
 
 //! Traits to be implemented by backends
 
+use crate::ContextId;
 use crate::EnvironmentBlendMode;
 use crate::Error;
 use crate::Event;
@@ -12,6 +13,8 @@ use crate::Frame;
 use crate::HitTestId;
 use crate::HitTestSource;
 use crate::InputSource;
+use crate::LayerId;
+use crate::LayerInit;
 use crate::Native;
 use crate::Quitter;
 use crate::Sender;
@@ -24,31 +27,34 @@ use crate::Viewports;
 use euclid::RigidTransform3D;
 
 /// A trait for discovering XR devices
-pub trait DiscoveryAPI<SwapChains>: 'static {
+pub trait DiscoveryAPI<GL>: 'static {
     fn request_session(
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder<SwapChains>,
+        xr: SessionBuilder<GL>,
     ) -> Result<Session, Error>;
     fn supports_session(&self, mode: SessionMode) -> bool;
 }
 
 /// A trait for using an XR device
-pub trait DeviceAPI<Surface>: 'static {
+pub trait DeviceAPI: 'static {
+    /// Create a new layer
+    fn create_layer(&mut self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error>;
+
+    /// Destroy a layer
+    fn destroy_layer(&mut self, context_id: ContextId, layer_id: LayerId);
+
     /// The transform from native coordinates to the floor.
     fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>>;
 
     fn viewports(&self) -> Viewports;
 
-    /// This method should block waiting for the next frame,
-    /// and return the information for it.
-    fn wait_for_animation_frame(&mut self) -> Option<Frame>;
+    /// Begin an animation frame.
+    fn begin_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) -> Option<Frame>;
 
-    /// This method should render a surface to the device.
-    /// While this method is being called, the device has ownership
-    /// of the surface, and should return it afterwards.
-    fn render_animation_frame(&mut self, surface: Surface) -> Surface;
+    /// End an animation frame, render the layer to the device, and block waiting for the next frame.
+    fn end_animation_frame(&mut self, layers: &[(ContextId, LayerId)]);
 
     /// Inputs registered with the device on initialization. More may be added, which
     /// should be communicated through a yet-undecided event mechanism
@@ -80,12 +86,12 @@ pub trait DeviceAPI<Surface>: 'static {
     }
 }
 
-impl<SwapChains: 'static> DiscoveryAPI<SwapChains> for Box<dyn DiscoveryAPI<SwapChains>> {
+impl<GL: 'static> DiscoveryAPI<GL> for Box<dyn DiscoveryAPI<GL>> {
     fn request_session(
         &mut self,
         mode: SessionMode,
         init: &SessionInit,
-        xr: SessionBuilder<SwapChains>,
+        xr: SessionBuilder<GL>,
     ) -> Result<Session, Error> {
         (&mut **self).request_session(mode, init, xr)
     }

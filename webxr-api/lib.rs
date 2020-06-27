@@ -4,12 +4,6 @@
 
 //! This crate defines the Rust API for WebXR. It is implemented by the `webxr` crate.
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
-
-#[cfg(feature = "ipc")]
-use serde::{Deserialize, Serialize};
-
 mod device;
 mod error;
 mod events;
@@ -17,6 +11,7 @@ mod frame;
 mod hand;
 mod hittest;
 mod input;
+mod layer;
 mod mock;
 mod registry;
 mod session;
@@ -61,6 +56,20 @@ pub use input::SelectEvent;
 pub use input::SelectKind;
 pub use input::TargetRayMode;
 
+pub use layer::ContextId;
+pub use layer::GLContexts;
+pub use layer::GLTypes;
+pub use layer::LayerGrandManager;
+pub use layer::LayerGrandManagerAPI;
+pub use layer::LayerId;
+pub use layer::LayerInit;
+pub use layer::LayerLayout;
+pub use layer::LayerManager;
+pub use layer::LayerManagerAPI;
+pub use layer::LayerManagerFactory;
+pub use layer::SubImage;
+pub use layer::SubImages;
+
 pub use mock::MockDeviceInit;
 pub use mock::MockDeviceMsg;
 pub use mock::MockDiscoveryAPI;
@@ -101,19 +110,6 @@ pub use view::Viewer;
 pub use view::Viewport;
 pub use view::Viewports;
 pub use view::Views;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
-pub struct SwapChainId(usize);
-
-impl SwapChainId {
-    pub fn new() -> Self {
-        let id = NEXT_SWAP_CHAIN_ID.fetch_add(1, Ordering::SeqCst);
-        Self(id)
-    }
-}
-
-static NEXT_SWAP_CHAIN_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(feature = "ipc")]
 use std::thread;
