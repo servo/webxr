@@ -38,7 +38,7 @@ crossbeam-channel = "0.4"
 euclid = "0.20.10"
 log = "0.4.6"
 gvr-sys = { version = "0.7", optional = true }
-openxr = { git = "https://github.com/servo/openxrs.git", branch="xr-msft", optional = true }
+openxr = { git = "https://github.com/servo/openxrs.git", branch="secondary-views-2", optional = true }
 serde = { version = "1.0", optional = true }
 sparkle = "0.1"
 surfman = { version = "0.3", features = ["sm-x11"] }

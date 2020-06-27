@@ -206,10 +206,10 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
         .enumerate_extensions()
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
     warn!("Available extensions:\n{:?}", supported);
-    let mut supports_hands = needs_hands && supported.msft_hand_tracking_preview;
+    let mut supports_hands = needs_hands && supported.ext_hand_tracking;
     let supports_secondary = SECONDARY_VIEW_ENABLED
-        && supported.msft_secondary_view_configuration_preview
-        && supported.msft_first_person_observer_preview;
+        && supported.msft_secondary_view_configuration
+        && supported.msft_first_person_observer;
     let app_info = ApplicationInfo {
         application_name: "firefox.reality",
         application_version: 1,
@@ -220,16 +220,16 @@ pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
     let mut exts = ExtensionSet::default();
     exts.khr_d3d11_enable = true;
     if supports_hands {
-        exts.msft_hand_tracking_preview = true;
+        exts.ext_hand_tracking = true;
     }
 
     if supports_secondary {
-        exts.msft_secondary_view_configuration_preview = true;
-        exts.msft_first_person_observer_preview = true;
+        exts.msft_secondary_view_configuration = true;
+        exts.msft_first_person_observer = true;
     }
 
     let instance = entry
-        .create_instance(&app_info, &exts)
+        .create_instance(&app_info, &exts, &[])
         .map_err(|e| format!("Entry::create_instance {:?}", e))?;
     let system = instance
         .system(FormFactor::HEAD_MOUNTED_DISPLAY)

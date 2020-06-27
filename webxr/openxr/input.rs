@@ -88,7 +88,6 @@ pub struct OpenXRInput {
     menu_gesture_sustain: u8,
     #[allow(unused)]
     hand_tracker: Option<HandTracker>,
-    joints: Option<Hand<Space>>,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -143,102 +142,15 @@ impl OpenXRInput {
             )
             .unwrap();
 
-        let (hand_tracker, joints) = if needs_hands {
+        let hand_tracker = if needs_hands {
             let hand = match handedness {
                 Handedness::Left => HandEnum::LEFT,
                 Handedness::Right => HandEnum::RIGHT,
                 _ => panic!("We don't support unknown handedness in openxr"),
             };
-            let hand_tracker = session.create_hand_tracker(hand).unwrap();
-
-            let joints = Hand {
-                wrist: hand_tracker
-                    .create_joint_space(HandJoint::WRIST, IDENTITY_POSE)
-                    .ok(),
-                thumb_metacarpal: hand_tracker
-                    .create_joint_space(HandJoint::THUMB_METACARPAL, IDENTITY_POSE)
-                    .ok(),
-                thumb_phalanx_proximal: hand_tracker
-                    .create_joint_space(HandJoint::THUMB_PROXIMAL, IDENTITY_POSE)
-                    .ok(),
-                thumb_phalanx_distal: hand_tracker
-                    .create_joint_space(HandJoint::THUMB_DISTAL, IDENTITY_POSE)
-                    .ok(),
-                thumb_phalanx_tip: hand_tracker
-                    .create_joint_space(HandJoint::THUMB_TIP, IDENTITY_POSE)
-                    .ok(),
-                index: Finger {
-                    metacarpal: hand_tracker
-                        .create_joint_space(HandJoint::INDEX_METACARPAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_proximal: hand_tracker
-                        .create_joint_space(HandJoint::INDEX_PROXIMAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_intermediate: hand_tracker
-                        .create_joint_space(HandJoint::INDEX_INTERMEDIATE, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_distal: hand_tracker
-                        .create_joint_space(HandJoint::INDEX_DISTAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_tip: hand_tracker
-                        .create_joint_space(HandJoint::INDEX_TIP, IDENTITY_POSE)
-                        .ok(),
-                },
-                middle: Finger {
-                    metacarpal: hand_tracker
-                        .create_joint_space(HandJoint::MIDDLE_METACARPAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_proximal: hand_tracker
-                        .create_joint_space(HandJoint::MIDDLE_PROXIMAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_intermediate: hand_tracker
-                        .create_joint_space(HandJoint::MIDDLE_INTERMEDIATE, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_distal: hand_tracker
-                        .create_joint_space(HandJoint::MIDDLE_DISTAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_tip: hand_tracker
-                        .create_joint_space(HandJoint::MIDDLE_TIP, IDENTITY_POSE)
-                        .ok(),
-                },
-                ring: Finger {
-                    metacarpal: hand_tracker
-                        .create_joint_space(HandJoint::RING_METACARPAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_proximal: hand_tracker
-                        .create_joint_space(HandJoint::RING_PROXIMAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_intermediate: hand_tracker
-                        .create_joint_space(HandJoint::RING_INTERMEDIATE, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_distal: hand_tracker
-                        .create_joint_space(HandJoint::RING_DISTAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_tip: hand_tracker
-                        .create_joint_space(HandJoint::RING_TIP, IDENTITY_POSE)
-                        .ok(),
-                },
-                little: Finger {
-                    metacarpal: hand_tracker
-                        .create_joint_space(HandJoint::LITTLE_METACARPAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_proximal: hand_tracker
-                        .create_joint_space(HandJoint::LITTLE_PROXIMAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_intermediate: hand_tracker
-                        .create_joint_space(HandJoint::LITTLE_INTERMEDIATE, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_distal: hand_tracker
-                        .create_joint_space(HandJoint::LITTLE_DISTAL, IDENTITY_POSE)
-                        .ok(),
-                    phalanx_tip: hand_tracker
-                        .create_joint_space(HandJoint::LITTLE_TIP, IDENTITY_POSE)
-                        .ok(),
-                },
-            };
-            (Some(hand_tracker), Some(joints))
+            session.create_hand_tracker(hand).ok()
         } else {
-            (None, None)
+            None
         };
 
         Self {
@@ -254,7 +166,6 @@ impl OpenXRInput {
             squeeze_state: ClickState::Done,
             menu_gesture_sustain: 0,
             hand_tracker,
-            joints,
         }
     }
 
@@ -406,13 +317,8 @@ impl OpenXRInput {
                 .update(&self.action_squeeze, session, menu_selected);
 
         let hand = target_ray_origin
-            .and_then(|_origin| self.joints.as_ref())
-            .map(|joints| {
-                Box::new(joints.map(|j, _| {
-                    j.as_ref()
-                        .and_then(|j| joint_for(j, frame_state, base_space))
-                }))
-            });
+            .and_then(|_origin| self.hand_tracker.as_ref())
+            .and_then(|tracker| locate_hand(base_space, tracker, frame_state));
 
         let input_frame = InputFrame {
             target_ray_origin,
@@ -432,6 +338,12 @@ impl OpenXRInput {
     }
 
     pub fn input_source(&self) -> InputSource {
+        let hand_support = if self.hand_tracker.is_some() {
+            // openxr runtimes must always support all or none joints
+            Some(Hand::<()>::default().map(|_, _| Some(())))
+        } else {
+            None
+        };
         InputSource {
             handedness: self.handedness,
             id: self.id,
@@ -440,10 +352,7 @@ impl OpenXRInput {
             // XXXManishearth update with whatever we decide
             // in https://github.com/immersive-web/webxr-input-profiles/issues/105
             profiles: vec!["generic-hand".into()],
-            hand_support: self
-                .joints
-                .as_ref()
-                .map(|h| h.map(|j, _| j.as_ref().map(|_| ()))),
+            hand_support,
         }
     }
 }
@@ -466,23 +375,65 @@ fn pose_for(
     }
 }
 
-fn joint_for(
-    joint_space: &Space,
-    frame_state: &FrameState,
+fn locate_hand(
     base_space: &Space,
-) -> Option<JointFrame> {
-    let (location, radius) = joint_space
-        .locate_radius(base_space, frame_state.predicted_display_time)
-        .unwrap();
-    let pose_valid = location
-        .location_flags
-        .intersects(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID);
-    if pose_valid {
-        Some(JointFrame {
-            pose: super::transform(&location.pose),
-            radius,
-        })
+    tracker: &HandTracker,
+    frame_state: &FrameState,
+) -> Option<Box<Hand<JointFrame>>> {
+    let locations = base_space.locate_hand_joints(tracker, frame_state.predicted_display_time);
+    let locations = if let Ok(Some(ref locations)) = locations {
+        Hand {
+            wrist: Some(&locations[HandJoint::WRIST]),
+            thumb_metacarpal: Some(&locations[HandJoint::THUMB_METACARPAL]),
+            thumb_phalanx_proximal: Some(&locations[HandJoint::THUMB_PROXIMAL]),
+            thumb_phalanx_distal: Some(&locations[HandJoint::THUMB_DISTAL]),
+            thumb_phalanx_tip: Some(&locations[HandJoint::THUMB_TIP]),
+            index: Finger {
+                metacarpal: Some(&locations[HandJoint::INDEX_METACARPAL]),
+                phalanx_proximal: Some(&locations[HandJoint::INDEX_METACARPAL]),
+                phalanx_intermediate: Some(&locations[HandJoint::INDEX_PROXIMAL]),
+                phalanx_distal: Some(&locations[HandJoint::INDEX_DISTAL]),
+                phalanx_tip: Some(&locations[HandJoint::INDEX_TIP]),
+            },
+            middle: Finger {
+                metacarpal: Some(&locations[HandJoint::MIDDLE_METACARPAL]),
+                phalanx_proximal: Some(&locations[HandJoint::MIDDLE_METACARPAL]),
+                phalanx_intermediate: Some(&locations[HandJoint::MIDDLE_PROXIMAL]),
+                phalanx_distal: Some(&locations[HandJoint::MIDDLE_DISTAL]),
+                phalanx_tip: Some(&locations[HandJoint::MIDDLE_TIP]),
+            },
+            ring: Finger {
+                metacarpal: Some(&locations[HandJoint::RING_METACARPAL]),
+                phalanx_proximal: Some(&locations[HandJoint::RING_METACARPAL]),
+                phalanx_intermediate: Some(&locations[HandJoint::RING_PROXIMAL]),
+                phalanx_distal: Some(&locations[HandJoint::RING_DISTAL]),
+                phalanx_tip: Some(&locations[HandJoint::RING_TIP]),
+            },
+            little: Finger {
+                metacarpal: Some(&locations[HandJoint::LITTLE_METACARPAL]),
+                phalanx_proximal: Some(&locations[HandJoint::LITTLE_METACARPAL]),
+                phalanx_intermediate: Some(&locations[HandJoint::LITTLE_PROXIMAL]),
+                phalanx_distal: Some(&locations[HandJoint::LITTLE_DISTAL]),
+                phalanx_tip: Some(&locations[HandJoint::LITTLE_TIP]),
+            },
+        }
     } else {
-        None
-    }
+        return None;
+    };
+
+    Some(Box::new(locations.map(|loc, _| {
+        loc.and_then(|location| {
+            let pose_valid = location.location_flags.intersects(
+                SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID,
+            );
+            if pose_valid {
+                Some(JointFrame {
+                    pose: super::transform(&location.pose),
+                    radius: location.radius,
+                })
+            } else {
+                None
+            }
+        })
+    })))
 }
