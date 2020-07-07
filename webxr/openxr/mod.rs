@@ -361,6 +361,7 @@ struct OpenXrDevice {
     viewer_space: Space,
     shared_data: Arc<Mutex<Option<SharedData>>>,
     clip_planes: ClipPlanes,
+    supports_secondary: bool,
 
     // input
     action_set: ActionSet,
@@ -952,6 +953,7 @@ impl OpenXrDevice {
             frame_waiter,
             viewer_space,
             clip_planes: Default::default(),
+            supports_secondary,
             layer_manager,
             shared_data,
 
@@ -1106,15 +1108,7 @@ impl DeviceAPI for OpenXrDevice {
             }
         }
 
-        let (frame_state, secondary_state) = if self
-            .shared_data
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .secondary
-            .is_some()
-        {
+        let (frame_state, secondary_state) = if self.supports_secondary {
             let (frame_state, secondary_state) = match self.frame_waiter.wait_secondary() {
                 Ok(frame_state) => frame_state,
                 Err(e) => {
