@@ -109,7 +109,10 @@ const SECONDARY_VIEW_ENABLED: bool = false;
 
 // How much to downscale the view capture by.
 // This is used for performance reasons, to dedicate less texture memory to the camera.
-const SECONDARY_VIEW_DOWNSCALE: u32 = 2;
+// Note that on an HL2 this allocates enough texture memory for "low power" mode,
+// not "high quality" (in the device portal under
+// Views > Mixed Reality Capture > Photo and Video Settings).
+const SECONDARY_VIEW_DOWNSCALE: i32 = 2;
 
 /// Provides a way to spawn and interact with context menus
 pub trait ContextMenuProvider: Send {
@@ -358,6 +361,7 @@ struct OpenXrDevice {
     viewer_space: Space,
     shared_data: Arc<Mutex<Option<SharedData>>>,
     clip_planes: ClipPlanes,
+    supports_secondary: bool,
 
     // input
     action_set: ActionSet,
@@ -374,6 +378,7 @@ struct SharedData {
     left: ViewInfo<LeftEye>,
     right: ViewInfo<RightEye>,
     secondary: Option<ViewInfo<Capture>>,
+    secondary_active: bool,
     primary_blend_mode: EnvironmentBlendMode,
     secondary_blend_mode: Option<EnvironmentBlendMode>,
     frame_state: Option<FrameState>,
@@ -418,7 +423,7 @@ impl OpenXrLayerManager {
         instance: &Instance,
         system: SystemId,
     ) -> Result<(Session<D3D11>, FrameWaiter, FrameStream<D3D11>), Error> {
-        // Get the current surfman device and extract it's D3D device. This will ensure
+        // Get the current surfman device and extract its D3D device. This will ensure
         // that the OpenXR runtime's texture will be shareable with surfman's surfaces.
         let native_device = device.native_device();
         let d3d_device = native_device.d3d11_device;
@@ -566,6 +571,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         std::mem::swap(&mut l_fov.angle_up, &mut l_fov.angle_down);
         std::mem::swap(&mut r_fov.angle_up, &mut r_fov.angle_down);
 
+        let viewports = data.viewports();
         let primary_views = layers
             .iter()
             .filter_map(|&(_, layer_id)| {
@@ -578,10 +584,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                             openxr::SwapchainSubImage::new()
                                 .swapchain(&openxr_layer.swapchain)
                                 .image_array_index(0)
-                                .image_rect(openxr::Rect2Di {
-                                    offset: openxr::Offset2Di { x: 0, y: 0 },
-                                    extent: data.left.extent,
-                                }),
+                                .image_rect(image_rect(viewports.viewports[0])),
                         ),
                     openxr::CompositionLayerProjectionView::new()
                         .pose(data.right.view.pose)
@@ -590,13 +593,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                             openxr::SwapchainSubImage::new()
                                 .swapchain(&openxr_layer.swapchain)
                                 .image_array_index(0)
-                                .image_rect(openxr::Rect2Di {
-                                    offset: openxr::Offset2Di {
-                                        x: data.left.extent.width,
-                                        y: 0,
-                                    },
-                                    extent: data.right.extent,
-                                }),
+                                .image_rect(image_rect(viewports.viewports[1])),
                         ),
                 ])
             })
@@ -617,7 +614,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
             .map(|layer| layer.deref())
             .collect::<Vec<_>>();
 
-        if let Some(ref secondary) = data.secondary {
+        if let (Some(secondary), true) = (data.secondary.as_ref(), data.secondary_active) {
             let mut s_fov = secondary.view.fov;
             std::mem::swap(&mut s_fov.angle_up, &mut s_fov.angle_down);
             let secondary_views = layers
@@ -631,13 +628,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                             openxr::SwapchainSubImage::new()
                                 .swapchain(&openxr_layer.swapchain)
                                 .image_array_index(0)
-                                .image_rect(openxr::Rect2Di {
-                                    offset: openxr::Offset2Di {
-                                        x: data.left.extent.width + data.right.extent.width,
-                                        y: 0,
-                                    },
-                                    extent: secondary.extent,
-                                }),
+                                .image_rect(image_rect(viewports.viewports[2])),
                         )])
                 })
                 .collect::<Vec<_>>();
@@ -693,6 +684,9 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         contexts: &mut dyn GLContexts<SurfmanGL>,
         layers: &[(ContextId, LayerId)],
     ) -> Result<Vec<SubImages>, Error> {
+        let data_guard = self.shared_data.lock().unwrap();
+        let data = data_guard.as_ref().unwrap();
+        let openxr_layers = &mut self.openxr_layers;
         self.frame_stream
             .begin()
             .map_err(|e| Error::BackendSpecific(format!("FrameStream::begin {:?}", e)))?;
@@ -702,8 +696,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                 let context = contexts
                     .context(device, context_id)
                     .ok_or(Error::NoMatchingDevice)?;
-                let openxr_layer = self
-                    .openxr_layers
+                let openxr_layer = openxr_layers
                     .get_mut(&layer_id)
                     .ok_or(Error::NoMatchingDevice)?;
 
@@ -728,28 +721,23 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
                 let texture_size = openxr_layer.size;
-                let offset = Point2D::new(texture_size.width / 2, 0);
-                let view_size = Size2D::new(texture_size.width / 2, texture_size.height);
                 let sub_image = Some(SubImage {
                     color_texture,
                     depth_stencil_texture,
                     texture_array_index,
                     viewport: Rect::new(origin, texture_size),
                 });
-                let view_sub_images = vec![
-                    SubImage {
+                let view_sub_images = data
+                    .viewports()
+                    .viewports
+                    .iter()
+                    .map(|&viewport| SubImage {
                         color_texture,
                         depth_stencil_texture,
                         texture_array_index,
-                        viewport: Rect::new(origin, view_size),
-                    },
-                    SubImage {
-                        color_texture,
-                        depth_stencil_texture,
-                        texture_array_index,
-                        viewport: Rect::new(offset, view_size),
-                    },
-                ];
+                        viewport,
+                    })
+                    .collect();
                 Ok(SubImages {
                     layer_id,
                     sub_image,
@@ -757,6 +745,19 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                 })
             })
             .collect()
+    }
+}
+
+fn image_rect(viewport: Rect<i32, Viewport>) -> openxr::Rect2Di {
+    openxr::Rect2Di {
+        extent: openxr::Extent2Di {
+            height: viewport.size.height,
+            width: viewport.size.width,
+        },
+        offset: openxr::Offset2Di {
+            x: viewport.origin.x,
+            y: viewport.origin.y,
+        },
     }
 }
 
@@ -865,6 +866,7 @@ impl OpenXrDevice {
             right_view_configuration.recommended_image_rect_height,
         );
 
+        let secondary_active = false;
         let (secondary, secondary_blend_mode) = if supports_secondary {
             let view_configuration = *instance
                 .enumerate_view_configuration_views(
@@ -895,10 +897,8 @@ impl OpenXrDevice {
                 })?[0];
 
             let secondary_extent = Extent2Di {
-                width: (view_configuration.recommended_image_rect_width / SECONDARY_VIEW_DOWNSCALE)
-                    as i32,
-                height: (view_configuration.recommended_image_rect_height
-                    / SECONDARY_VIEW_DOWNSCALE) as i32,
+                width: view_configuration.recommended_image_rect_width as i32,
+                height: view_configuration.recommended_image_rect_height as i32,
             };
 
             let secondary = ViewInfo {
@@ -937,6 +937,7 @@ impl OpenXrDevice {
             left,
             right,
             secondary,
+            secondary_active,
             primary_blend_mode,
             secondary_blend_mode,
         });
@@ -952,6 +953,7 @@ impl OpenXrDevice {
             frame_waiter,
             viewer_space,
             clip_planes: Default::default(),
+            supports_secondary,
             layer_manager,
             shared_data,
 
@@ -1035,7 +1037,8 @@ impl SharedData {
     fn views(&self) -> Views {
         let left_view = self.left.view();
         let right_view = self.right.view();
-        if let Some(ref secondary) = self.secondary {
+        if let (Some(secondary), true) = (self.secondary.as_ref(), self.secondary_active) {
+            // Note: we report the secondary view only when it is active
             let third_eye = secondary.view();
             return Views::StereoCapture(left_view, right_view, third_eye);
         }
@@ -1052,10 +1055,12 @@ impl SharedData {
             Size2D::new(self.right.extent.width, self.right.extent.height),
         );
         let mut viewports = vec![left_vp, right_vp];
+        // Note: we report the secondary viewport even when it is inactive
         if let Some(ref secondary) = self.secondary {
             let secondary_vp = Rect::new(
                 Point2D::new(self.left.extent.width + self.right.extent.width, 0),
-                Size2D::new(secondary.extent.width, secondary.extent.height),
+                Size2D::new(secondary.extent.width, secondary.extent.height)
+                    / SECONDARY_VIEW_DOWNSCALE,
             );
             viewports.push(secondary_vp)
         }
@@ -1103,16 +1108,36 @@ impl DeviceAPI for OpenXrDevice {
             }
         }
 
-        let mut guard = self.shared_data.lock().unwrap();
-        let mut data = guard.as_mut().unwrap();
-        let frame_state = match self.frame_waiter.wait() {
-            Ok(frame_state) => frame_state,
-            Err(e) => {
-                error!("Error waiting on frame: {:?}", e);
-                return None;
+        let (frame_state, secondary_state) = if self.supports_secondary {
+            let (frame_state, secondary_state) = match self.frame_waiter.wait_secondary() {
+                Ok(frame_state) => frame_state,
+                Err(e) => {
+                    error!("Error waiting on frame: {:?}", e);
+                    return None;
+                }
+            };
+
+            assert_eq!(
+                secondary_state.ty,
+                ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT
+            );
+            (frame_state, Some(secondary_state))
+        } else {
+            match self.frame_waiter.wait() {
+                Ok(frame_state) => (frame_state, None),
+                Err(e) => {
+                    error!("Error waiting on frame: {:?}", e);
+                    return None;
+                }
             }
         };
 
+        // We get the subimages before grabbing the lock,
+        // since otherwise we'll deadlock
+        let sub_images = self.layer_manager.begin_frame(layers).ok()?;
+
+        let mut guard = self.shared_data.lock().unwrap();
+        let mut data = guard.as_mut().unwrap();
         let time_ns = time::precise_time_ns();
 
         // XXXManishearth should we check frame_state.should_render?
@@ -1141,13 +1166,14 @@ impl DeviceAPI for OpenXrDevice {
         };
         let transform = transform(&pose.pose);
 
-        // the following code does a split borrow, which only works on actual references
-        let data_ = &mut *data;
-        if let Some(ref mut info) = data_.secondary {
+        if let Some(secondary_state) = secondary_state.as_ref() {
+            data.secondary_active = secondary_state.active;
+        }
+        if let (Some(secondary), true) = (data.secondary.as_mut(), data.secondary_active) {
             let view = match self.session.locate_views(
                 ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT,
                 frame_state.predicted_display_time,
-                &data_.space,
+                &data.space,
             ) {
                 Ok(v) => v.1[0],
                 Err(e) => {
@@ -1155,7 +1181,7 @@ impl DeviceAPI for OpenXrDevice {
                     return None;
                 }
             };
-            info.set_view(view, self.clip_planes);
+            secondary.set_view(view, self.clip_planes);
         }
 
         let active_action_set = ActiveActionSet::new(&self.action_set);
@@ -1174,8 +1200,6 @@ impl DeviceAPI for OpenXrDevice {
 
         data.frame_state = Some(frame_state);
         let views = data.views();
-
-        let sub_images = self.layer_manager.begin_frame(layers).ok()?;
 
         if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
             self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
@@ -1326,9 +1350,7 @@ fn transform<Src, Dst>(pose: &Posef) -> RigidTransform3D<f32, Src, Dst> {
         pose.orientation.z,
         pose.orientation.w,
     );
-
     let translation = Vector3D::new(pose.position.x, pose.position.y, pose.position.z);
-
     RigidTransform3D::new(rotation, translation)
 }
 
