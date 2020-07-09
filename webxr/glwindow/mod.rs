@@ -58,12 +58,21 @@ use webxr_api::Session;
 use webxr_api::SessionBuilder;
 use webxr_api::SessionInit;
 use webxr_api::SessionMode;
+use webxr_api::SomeEye;
 use webxr_api::View;
 use webxr_api::Viewer;
 use webxr_api::ViewerPose;
 use webxr_api::Viewport;
 use webxr_api::Viewports;
 use webxr_api::Views;
+use webxr_api::CUBE_BACK;
+use webxr_api::CUBE_BOTTOM;
+use webxr_api::CUBE_LEFT;
+use webxr_api::CUBE_RIGHT;
+use webxr_api::CUBE_TOP;
+use webxr_api::LEFT_EYE;
+use webxr_api::RIGHT_EYE;
+use webxr_api::VIEWER;
 
 // How far off the ground are the viewer's eyes?
 const HEIGHT: f32 = 1.0;
@@ -94,15 +103,8 @@ pub enum GlWindowMode {
     Blit,
     StereoLeftRight,
     StereoRedCyan,
-}
-
-impl GlWindowMode {
-    fn is_anaglyph(&self) -> bool {
-        match self {
-            GlWindowMode::Blit | GlWindowMode::StereoLeftRight => false,
-            GlWindowMode::StereoRedCyan => true,
-        }
-    }
+    Cubemap,
+    Spherical,
 }
 
 pub struct GlWindowDiscovery {
@@ -184,12 +186,23 @@ impl DeviceAPI for GlWindowDevice {
 
     fn viewports(&self) -> Viewports {
         let size = self.viewport_size();
-        Viewports {
-            viewports: vec![
-                Rect::new(Point2D::default(), size),
-                Rect::new(Point2D::new(size.width, 0), size),
+        let viewports = match self.window.get_mode() {
+            GlWindowMode::Cubemap | GlWindowMode::Spherical => vec![
+                Rect::new(Point2D::new(size.width * 1, size.height * 1), size),
+                Rect::new(Point2D::new(size.width * 0, size.height * 1), size),
+                Rect::new(Point2D::new(size.width * 2, size.height * 1), size),
+                Rect::new(Point2D::new(size.width * 2, size.height * 0), size),
+                Rect::new(Point2D::new(size.width * 0, size.height * 0), size),
+                Rect::new(Point2D::new(size.width * 1, size.height * 0), size),
             ],
-        }
+            GlWindowMode::Blit | GlWindowMode::StereoLeftRight | GlWindowMode::StereoRedCyan => {
+                vec![
+                    Rect::new(Point2D::default(), size),
+                    Rect::new(Point2D::new(size.width, 0), size),
+                ]
+            }
+        };
+        Viewports { viewports }
     }
 
     fn create_layer(&mut self, context_id: ContextId, init: LayerInit) -> Result<LayerId, Error> {
@@ -253,8 +266,8 @@ impl DeviceAPI for GlWindowDevice {
                 .unwrap();
             let texture_id = self.device.surface_texture_object(&surface_texture);
             let texture_target = self.device.surface_gl_texture_target();
-
             log::debug!("Presenting texture {}", texture_id);
+
             if let Some(ref shader) = self.shader {
                 shader.draw_texture(
                     texture_id,
@@ -453,38 +466,88 @@ impl GlWindowDevice {
             .unwrap()
             .size
             .to_i32();
-        if self.window.get_mode().is_anaglyph() {
-            // This device has a slightly odd characteristic, which is that anaglyphic stereo
-            // renders both eyes to the same surface. If we want the two eyes to be parallel,
-            // and to agree at distance infinity, this means gettng the XR content to render some
-            // wasted pixels, which are stripped off when we render to the target surface.
-            // (The wasted pixels are on the right of the left eye and vice versa.)
-            let wasted_pixels = (INTER_PUPILLARY_DISTANCE / PIXELS_PER_METRE) as i32;
-            Size2D::new(window_size.width + wasted_pixels, window_size.height)
-        } else {
-            Size2D::new(window_size.width / 2, window_size.height)
+        match self.window.get_mode() {
+            GlWindowMode::StereoRedCyan => {
+                // This device has a slightly odd characteristic, which is that anaglyphic stereo
+                // renders both eyes to the same surface. If we want the two eyes to be parallel,
+                // and to agree at distance infinity, this means gettng the XR content to render some
+                // wasted pixels, which are stripped off when we render to the target surface.
+                // (The wasted pixels are on the right of the left eye and vice versa.)
+                let wasted_pixels = (INTER_PUPILLARY_DISTANCE / PIXELS_PER_METRE) as i32;
+                Size2D::new(window_size.width + wasted_pixels, window_size.height)
+            }
+            GlWindowMode::Cubemap => {
+                // Cubemap viewports should be square
+                let size = 1.max(window_size.width / 3).max(window_size.height / 2);
+                Size2D::new(size, size)
+            }
+            GlWindowMode::Spherical => {
+                // Cubemap viewports should be square
+                let size = 1.max(window_size.width / 2).max(window_size.height);
+                Size2D::new(size, size)
+            }
+            GlWindowMode::StereoLeftRight | GlWindowMode::Blit => {
+                Size2D::new(window_size.width / 2, window_size.height)
+            }
         }
     }
 
     fn views(&self, viewer: RigidTransform3D<f32, Viewer, Native>) -> Views {
-        let left = self.view(viewer, false);
-        let right = self.view(viewer, true);
-        Views::Stereo(left, right)
+        match self.window.get_mode() {
+            GlWindowMode::Cubemap | GlWindowMode::Spherical => Views::Cubemap(
+                self.view(viewer, VIEWER),
+                self.view(viewer, CUBE_LEFT),
+                self.view(viewer, CUBE_RIGHT),
+                self.view(viewer, CUBE_TOP),
+                self.view(viewer, CUBE_BOTTOM),
+                self.view(viewer, CUBE_BACK),
+            ),
+            GlWindowMode::Blit | GlWindowMode::StereoLeftRight | GlWindowMode::StereoRedCyan => {
+                Views::Stereo(self.view(viewer, LEFT_EYE), self.view(viewer, RIGHT_EYE))
+            }
+        }
     }
 
     fn view<Eye>(
         &self,
         viewer: RigidTransform3D<f32, Viewer, Native>,
-        is_right: bool,
+        eye: SomeEye<Eye>,
     ) -> View<Eye> {
         let projection = self.perspective();
-        let translation = if is_right {
+        let translation = if eye == RIGHT_EYE {
             Vector3D::new(-INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
-        } else {
+        } else if eye == LEFT_EYE {
             Vector3D::new(INTER_PUPILLARY_DISTANCE / 2.0, 0.0, 0.0)
+        } else {
+            Vector3D::zero()
+        };
+        let rotation = if eye == CUBE_TOP {
+            Rotation3D::euler(
+                Angle::degrees(270.0),
+                Angle::degrees(0.0),
+                Angle::degrees(90.0),
+            )
+        } else if eye == CUBE_BOTTOM {
+            Rotation3D::euler(
+                Angle::degrees(90.0),
+                Angle::degrees(0.0),
+                Angle::degrees(90.0),
+            )
+        } else if eye == CUBE_LEFT {
+            Rotation3D::around_y(Angle::degrees(-90.0))
+        } else if eye == CUBE_RIGHT {
+            Rotation3D::around_y(Angle::degrees(90.0))
+        } else if eye == CUBE_BACK {
+            Rotation3D::euler(
+                Angle::degrees(180.0),
+                Angle::degrees(0.0),
+                Angle::degrees(90.0),
+            )
+        } else {
+            Rotation3D::identity()
         };
         let transform: RigidTransform3D<f32, Viewer, Eye> =
-            RigidTransform3D::from_translation(translation);
+            RigidTransform3D::new(rotation, translation);
         View {
             transform: viewer.pre_transform(&transform.inverse()),
             projection,
@@ -494,8 +557,13 @@ impl GlWindowDevice {
     fn perspective<Eye>(&self) -> Transform3D<f32, Eye, Display> {
         let near = self.clip_planes.near;
         let far = self.clip_planes.far;
-        // https://gith<ub.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
-        let fov_up = Angle::degrees(FOV_UP);
+        // https://github.com/toji/gl-matrix/blob/bd3307196563fbb331b40fc6ebecbbfcc2a4722c/src/mat4.js#L1271
+        let fov_up = match self.window.get_mode() {
+            GlWindowMode::Spherical | GlWindowMode::Cubemap => Angle::degrees(45.0),
+            GlWindowMode::Blit | GlWindowMode::StereoLeftRight | GlWindowMode::StereoRedCyan => {
+                Angle::degrees(FOV_UP)
+            }
+        };
         let f = 1.0 / fov_up.radians.tan();
         let nf = 1.0 / (near - far);
         let viewport_size = self.viewport_size();
@@ -576,6 +644,58 @@ const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &[u8] = b"
   }
 ";
 
+const SPHERICAL_VERTEX_SHADER: &[u8] = b"
+  #version 330 core
+  layout(location=0) in vec2 coord;
+  out vec2 lon_lat;
+  const float PI = 3.141592654;
+  void main(void) {
+    lon_lat = coord * vec2(PI, 0.5*PI);
+    gl_Position = vec4(coord, 0.0, 1.0);
+  }
+";
+
+const SPHERICAL_FRAGMENT_SHADER: &[u8] = b"
+  #version 330 core
+  layout(location=0) out vec4 color;
+  uniform sampler2D image;
+  in vec2 lon_lat;
+  void main() {
+    vec3 direction = vec3(
+      sin(lon_lat.x)*cos(lon_lat.y),
+      sin(lon_lat.y),
+      cos(lon_lat.x)*cos(lon_lat.y)
+    );
+    vec2 vTexCoord;
+    if ((direction.y > abs(direction.x)) && (direction.y > abs(direction.z))) {
+      // Looking up
+      vTexCoord.x = direction.z / (direction.y*6.0) + 5.0/6.0;
+      vTexCoord.y = direction.x / (direction.y*4.0) + 1.0/4.0;
+    } else if ((direction.y < -abs(direction.x)) && (direction.y < -abs(direction.z))) {
+      // Looking down
+      vTexCoord.x = direction.z / (direction.y*6.0) + 1.0/6.0;
+      vTexCoord.y = -direction.x / (direction.y*4.0) + 1.0/4.0;
+    } else if (direction.z < -abs(direction.x)) {
+      // Looking back
+      vTexCoord.x = -direction.y / (direction.z*6.0) + 3.0/6.0;
+      vTexCoord.y = -direction.x / (direction.z*4.0) + 1.0/4.0;
+    } else if (direction.x < -abs(direction.z)) {
+      // Looking left
+      vTexCoord.x = -direction.z / (direction.x*6.0) + 1.0/6.0;
+      vTexCoord.y = -direction.y / (direction.x*4.0) + 3.0/4.0;
+    } else if (direction.x > abs(direction.z)) {
+      // Looking right
+      vTexCoord.x = -direction.z / (direction.x*6.0) + 5.0/6.0;
+      vTexCoord.y = direction.y / (direction.x*4.0) + 3.0/4.0;
+    } else {
+      // Looking ahead
+      vTexCoord.x = direction.x / (direction.z*6.0) + 3.0/6.0;
+      vTexCoord.y = direction.y / (direction.z*4.0) + 3.0/4.0;
+    }
+    color = texture(image, vTexCoord);
+  }
+";
+
 impl GlWindowShader {
     fn new(gl: Rc<Gl>, mode: GlWindowMode) -> Option<GlWindowShader> {
         // The shader source
@@ -583,12 +703,13 @@ impl GlWindowShader {
             GlWindowMode::Blit => {
                 return None;
             }
-            GlWindowMode::StereoLeftRight => {
+            GlWindowMode::StereoLeftRight | GlWindowMode::Cubemap => {
                 (PASSTHROUGH_VERTEX_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
             }
             GlWindowMode::StereoRedCyan => {
                 (ANAGLYPH_VERTEX_SHADER, ANAGLYPH_RED_CYAN_FRAGMENT_SHADER)
             }
+            GlWindowMode::Spherical => (SPHERICAL_VERTEX_SHADER, SPHERICAL_FRAGMENT_SHADER),
         };
 
         // TODO: work out why shaders don't work on macos
@@ -686,13 +807,19 @@ impl GlWindowShader {
         self.gl.active_texture(gl::TEXTURE0);
         self.gl.bind_texture(texture_target, texture_id);
 
-        if self.mode.is_anaglyph() {
-            let wasted = 1.0
-                - (texture_size.width as f32 / viewport_size.width as f32)
-                    .max(0.0)
-                    .min(1.0);
-            let wasted_location = self.gl.get_uniform_location(self.program, "wasted");
-            self.gl.uniform_1f(wasted_location, wasted);
+        match self.mode {
+            GlWindowMode::StereoRedCyan => {
+                let wasted = 1.0
+                    - (texture_size.width as f32 / viewport_size.width as f32)
+                        .max(0.0)
+                        .min(1.0);
+                let wasted_location = self.gl.get_uniform_location(self.program, "wasted");
+                self.gl.uniform_1f(wasted_location, wasted);
+            }
+            GlWindowMode::Blit
+            | GlWindowMode::Cubemap
+            | GlWindowMode::Spherical
+            | GlWindowMode::StereoLeftRight => {}
         }
 
         self.gl
