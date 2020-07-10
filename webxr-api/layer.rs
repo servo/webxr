@@ -90,7 +90,7 @@ pub trait LayerManagerAPI<GL: GLTypes> {
     fn create_layer(
         &mut self,
         device: &mut GL::Device,
-        context: &mut GL::Context,
+        contexts: &mut dyn GLContexts<GL>,
         context_id: ContextId,
         init: LayerInit,
     ) -> Result<LayerId, Error>;
@@ -98,7 +98,7 @@ pub trait LayerManagerAPI<GL: GLTypes> {
     fn destroy_layer(
         &mut self,
         device: &mut GL::Device,
-        context: &mut GL::Context,
+        contexts: &mut dyn GLContexts<GL>,
         context_id: ContextId,
         layer_id: LayerId,
     );
