@@ -492,7 +492,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
     fn create_layer(
         &mut self,
         _device: &mut SurfmanDevice,
-        _context: &mut SurfmanContext,
+        _contexts: &mut dyn GLContexts<SurfmanGL>,
         context_id: ContextId,
         init: LayerInit,
     ) -> Result<LayerId, Error> {
@@ -531,7 +531,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
     fn destroy_layer(
         &mut self,
         _device: &mut SurfmanDevice,
-        _context: &mut SurfmanContext,
+        _contexts: &mut dyn GLContexts<SurfmanGL>,
         context_id: ContextId,
         layer_id: LayerId,
     ) {
