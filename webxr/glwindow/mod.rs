@@ -32,6 +32,7 @@ use surfman::NativeWidget;
 use surfman::SurfaceAccess;
 use surfman::SurfaceType;
 
+use surfman_chains::SwapChain;
 use surfman_chains::SwapChainAPI;
 use surfman_chains::SwapChains;
 use surfman_chains::SwapChainsAPI;
@@ -89,7 +90,11 @@ const INTER_PUPILLARY_DISTANCE: f32 = 0.06;
 const PIXELS_PER_METRE: f32 = 6000.0;
 
 pub trait GlWindow {
-    fn get_native_widget(&self, device: &SurfmanDevice) -> NativeWidget;
+    fn get_render_target(
+        &self,
+        device: &mut SurfmanDevice,
+        context: &mut SurfmanContext,
+    ) -> GlWindowRenderTarget;
     fn get_rotation(&self) -> Rotation3D<f32, UnknownUnit, UnknownUnit>;
     fn get_translation(&self) -> Vector3D<f32, UnknownUnit>;
 
@@ -105,6 +110,11 @@ pub enum GlWindowMode {
     StereoRedCyan,
     Cubemap,
     Spherical,
+}
+
+pub enum GlWindowRenderTarget {
+    NativeWidget(NativeWidget),
+    SwapChain(SwapChain<SurfmanDevice>),
 }
 
 pub struct GlWindowDiscovery {
@@ -170,6 +180,7 @@ pub struct GlWindowDevice {
     window: Box<dyn GlWindow>,
     grand_manager: LayerGrandManager<SurfmanGL>,
     layer_manager: Option<LayerManager>,
+    target_swap_chain: Option<SwapChain<SurfmanDevice>>,
     swap_chains: SwapChains<LayerId, SurfmanDevice>,
     read_fbo: GLuint,
     events: EventBuffer,
@@ -246,6 +257,25 @@ impl DeviceAPI for GlWindowDevice {
 
         let _ = self.layer_manager().unwrap().end_frame(layers);
 
+        let window_size = self.window_size();
+        let viewport_size = self.viewport_size();
+
+        let framebuffer_object = self
+            .device
+            .context_surface_info(&self.context)
+            .unwrap()
+            .map(|info| info.framebuffer_object)
+            .unwrap_or(0);
+        self.gl
+            .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
+        debug_assert_eq!(
+            (
+                self.gl.get_error(),
+                self.gl.check_framebuffer_status(gl::FRAMEBUFFER)
+            ),
+            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+        );
+
         self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
@@ -273,10 +303,11 @@ impl DeviceAPI for GlWindowDevice {
                     texture_id,
                     texture_target,
                     texture_size,
-                    self.viewport_size(),
+                    viewport_size,
+                    window_size,
                 );
             } else {
-                self.blit_texture(texture_id, texture_target, texture_size);
+                self.blit_texture(texture_id, texture_target, texture_size, window_size);
             }
             debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
@@ -287,32 +318,30 @@ impl DeviceAPI for GlWindowDevice {
             swap_chain.recycle_surface(surface);
         }
 
-        let mut surface = self
-            .device
-            .unbind_surface_from_context(&mut self.context)
-            .unwrap()
-            .unwrap();
-        self.device
-            .present_surface(&self.context, &mut surface)
-            .unwrap();
-        self.device
-            .bind_surface_to_context(&mut self.context, surface)
-            .unwrap();
-        let framebuffer_object = self
-            .device
-            .context_surface_info(&self.context)
-            .unwrap()
-            .map(|info| info.framebuffer_object)
-            .unwrap_or(0);
-        self.gl
-            .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
-        debug_assert_eq!(
-            (
-                self.gl.get_error(),
-                self.gl.check_framebuffer_status(gl::FRAMEBUFFER)
-            ),
-            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
-        );
+        match self.target_swap_chain.as_ref() {
+            Some(target_swap_chain) => {
+                // Rendering to a surfman swap chain
+                target_swap_chain
+                    .swap_buffers(&mut self.device, &mut self.context)
+                    .unwrap();
+            }
+            None => {
+                // Rendering to a native widget
+                let mut surface = self
+                    .device
+                    .unbind_surface_from_context(&mut self.context)
+                    .unwrap()
+                    .unwrap();
+                self.device
+                    .present_surface(&self.context, &mut surface)
+                    .unwrap();
+                self.device
+                    .bind_surface_to_context(&mut self.context, surface)
+                    .unwrap();
+            }
+        }
+
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -363,15 +392,7 @@ impl GlWindowDevice {
             .create_context_descriptor(&context_attributes)
             .unwrap();
         let mut context = device.create_context(&context_descriptor, None).unwrap();
-        let native_widget = window.get_native_widget(&device);
-        let surface_type = SurfaceType::Widget { native_widget };
-        let surface = device
-            .create_surface(&context, SurfaceAccess::GPUOnly, surface_type)
-            .unwrap();
         device.make_context_current(&context).unwrap();
-        device
-            .bind_surface_to_context(&mut context, surface)
-            .unwrap();
 
         let gl = match device.gl_api() {
             GLApi::GL => Gl::gl_fns(gl::ffi_gl::Gl::load_with(|symbol_name| {
@@ -381,6 +402,24 @@ impl GlWindowDevice {
                 device.get_proc_address(&context, symbol_name)
             })),
         };
+
+        let target_swap_chain = match window.get_render_target(&mut device, &mut context) {
+            GlWindowRenderTarget::NativeWidget(native_widget) => {
+                let surface_type = SurfaceType::Widget { native_widget };
+                let surface = device
+                    .create_surface(&context, SurfaceAccess::GPUOnly, surface_type)
+                    .unwrap();
+                device
+                    .bind_surface_to_context(&mut context, surface)
+                    .unwrap();
+                None
+            }
+            GlWindowRenderTarget::SwapChain(target_swap_chain) => {
+                debug_assert!(target_swap_chain.is_attached());
+                Some(target_swap_chain)
+            }
+        };
+
         let read_fbo = gl.gen_framebuffers(1)[0];
         let framebuffer_object = device
             .context_surface_info(&context)
@@ -406,6 +445,7 @@ impl GlWindowDevice {
             context,
             read_fbo,
             swap_chains,
+            target_swap_chain,
             grand_manager,
             layer_manager,
             events: Default::default(),
@@ -420,8 +460,8 @@ impl GlWindowDevice {
         texture_id: GLuint,
         texture_target: GLuint,
         texture_size: Size2D<i32, UnknownUnit>,
+        window_size: Size2D<i32, Viewport>,
     ) {
-        let viewport_size = self.viewport_size();
         self.gl
             .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
         self.gl.framebuffer_texture_2d(
@@ -438,8 +478,8 @@ impl GlWindowDevice {
             texture_size.height,
             0,
             0,
-            viewport_size.width * 2,
-            viewport_size.height,
+            window_size.width,
+            window_size.height,
             gl::COLOR_BUFFER_BIT,
             gl::NEAREST,
         );
@@ -458,7 +498,7 @@ impl GlWindowDevice {
         Ok(self.layer_manager.as_mut().unwrap())
     }
 
-    fn viewport_size(&self) -> Size2D<i32, Viewport> {
+    fn window_size(&self) -> Size2D<i32, Viewport> {
         let window_size = self
             .device
             .context_surface_info(&self.context)
@@ -466,6 +506,11 @@ impl GlWindowDevice {
             .unwrap()
             .size
             .to_i32();
+        Size2D::from_untyped(window_size)
+    }
+
+    fn viewport_size(&self) -> Size2D<i32, Viewport> {
+        let window_size = self.window_size();
         match self.window.get_mode() {
             GlWindowMode::StereoRedCyan => {
                 // This device has a slightly odd characteristic, which is that anaglyphic stereo
@@ -801,9 +846,22 @@ impl GlWindowShader {
         texture_target: GLuint,
         texture_size: Size2D<i32, UnknownUnit>,
         viewport_size: Size2D<i32, Viewport>,
+        window_size: Size2D<i32, Viewport>,
     ) {
         self.gl.use_program(self.program);
-        self.gl.bind_vertex_array(self.vao);
+
+        self.gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
+        self.gl.vertex_attrib_pointer(
+            VERTEX_ATTRIBUTE,
+            VERTICES[0].len() as i32,
+            gl::FLOAT,
+            false,
+            0,
+            0,
+        );
+
+        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+
         self.gl.active_texture(gl::TEXTURE0);
         self.gl.bind_texture(texture_target, texture_id);
 
@@ -823,7 +881,10 @@ impl GlWindowShader {
         }
 
         self.gl
+            .viewport(0, 0, window_size.width, window_size.height);
+        self.gl
             .draw_arrays(gl::TRIANGLE_STRIP, 0, VERTICES.len() as i32);
+        self.gl.disable_vertex_attrib_array(VERTEX_ATTRIBUTE);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
     }
 }
