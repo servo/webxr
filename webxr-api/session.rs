@@ -251,6 +251,13 @@ impl Session {
     }
 }
 
+#[derive(PartialEq)]
+enum RenderState {
+    NotInRenderLoop,
+    InRenderLoop,
+    PendingQuit,
+}
+
 /// For devices that want to do their own thread management, the `SessionThread` type is exposed.
 pub struct SessionThread<Device> {
     receiver: Receiver<SessionMsg>,
@@ -262,6 +269,7 @@ pub struct SessionThread<Device> {
     running: bool,
     device: Device,
     id: SessionId,
+    render_state: RenderState,
 }
 
 impl<Device> SessionThread<Device>
@@ -291,6 +299,7 @@ where
             frame_sender,
             running,
             id,
+            render_state: RenderState::NotInRenderLoop,
         })
     }
 
@@ -359,6 +368,7 @@ where
                         return false;
                     }
                 };
+                self.render_state = RenderState::InRenderLoop;
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::UpdateClipPlanes(near, far) => self.device.update_clip_planes(near, far),
@@ -375,6 +385,12 @@ where
                 #[cfg(feature = "profile")]
                 let end_frame = time::precise_time_ns();
                 self.device.end_animation_frame(&self.layers[..]);
+
+                if self.render_state == RenderState::PendingQuit {
+                    self.quit();
+                    return false;
+                }
+
                 #[cfg(feature = "profile")]
                 let ended_frame = time::precise_time_ns();
                 #[cfg(feature = "profile")]
@@ -410,12 +426,20 @@ where
                 let _ = self.frame_sender.send(frame);
             }
             SessionMsg::Quit => {
-                self.device.end_animation_frame(&self.layers[..]);
-                self.device.quit();
-                return false;
+                if self.render_state == RenderState::NotInRenderLoop {
+                    self.quit();
+                    return false;
+                } else {
+                    self.render_state = RenderState::PendingQuit;
+                }
             }
         }
         true
+    }
+
+    fn quit(&mut self) {
+        self.render_state = RenderState::NotInRenderLoop;
+        self.device.quit();
     }
 }
 
