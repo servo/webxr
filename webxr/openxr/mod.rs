@@ -17,6 +17,8 @@ use openxr::{
     SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
     SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
 };
+use sparkle::gl;
+use sparkle::gl::GLuint;
 use std::collections::HashMap;
 use std::mem;
 use std::ops::Deref;
@@ -395,6 +397,7 @@ struct OpenXrLayerManager {
 
 struct OpenXrLayer {
     swapchain: Swapchain<D3D11>,
+    depth_stencil_texture: Option<GLuint>,
     size: Size2D<i32, Viewport>,
     images: Vec<<D3D11 as Graphics>::SwapchainImage>,
     surface_textures: Vec<Option<SurfaceTexture>>,
@@ -445,7 +448,11 @@ impl OpenXrLayerManager {
 }
 
 impl OpenXrLayer {
-    fn new(swapchain: Swapchain<D3D11>, size: Size2D<i32, Viewport>) -> Result<OpenXrLayer, Error> {
+    fn new(
+        swapchain: Swapchain<D3D11>,
+        depth_stencil_texture: Option<GLuint>,
+        size: Size2D<i32, Viewport>,
+    ) -> Result<OpenXrLayer, Error> {
         let images = swapchain
             .enumerate_images()
             .map_err(|e| Error::BackendSpecific(format!("Session::enumerate_images {:?}", e)))?;
@@ -454,6 +461,7 @@ impl OpenXrLayer {
         surface_textures.resize_with(images.len(), || None);
         Ok(OpenXrLayer {
             swapchain,
+            depth_stencil_texture,
             size,
             images,
             surface_textures,
@@ -491,8 +499,8 @@ impl OpenXrLayer {
 impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
     fn create_layer(
         &mut self,
-        _device: &mut SurfmanDevice,
-        _contexts: &mut dyn GLContexts<SurfmanGL>,
+        device: &mut SurfmanDevice,
+        contexts: &mut dyn GLContexts<SurfmanGL>,
         context_id: ContextId,
         init: LayerInit,
     ) -> Result<LayerId, Error> {
@@ -521,8 +529,36 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
             .create_swapchain(&swapchain_create_info)
             .map_err(|e| Error::BackendSpecific(format!("Session::create_swapchain {:?}", e)))?;
 
+        // TODO: Treat depth and stencil separately?
+        // TODO: Use the openxr API for depth/stencil swap chains?
+        let has_depth_stencil = match init {
+            LayerInit::WebGLLayer { stencil, depth, .. } => stencil | depth,
+            LayerInit::ProjectionLayer { stencil, depth, .. } => stencil | depth,
+        };
+        let depth_stencil_texture = if has_depth_stencil {
+            let gl = contexts
+                .bindings(device, context_id)
+                .ok_or(Error::NoMatchingDevice)?;
+            let depth_stencil_texture = gl.gen_textures(1)[0];
+            gl.bind_texture(gl::TEXTURE_2D, depth_stencil_texture);
+            gl.tex_image_2d(
+                gl::TEXTURE_2D,
+                0,
+                gl::DEPTH24_STENCIL8 as _,
+                texture_size.width,
+                texture_size.height,
+                0,
+                gl::DEPTH_STENCIL,
+                gl::UNSIGNED_INT_24_8,
+                gl::TexImageSource::Pixels(None),
+            );
+            Some(depth_stencil_texture)
+        } else {
+            None
+        };
+
         let layer_id = LayerId::new();
-        let openxr_layer = OpenXrLayer::new(swapchain, texture_size)?;
+        let openxr_layer = OpenXrLayer::new(swapchain, depth_stencil_texture, texture_size)?;
         self.layers.push((context_id, layer_id));
         self.openxr_layers.insert(layer_id, openxr_layer);
         Ok(layer_id)
@@ -530,13 +566,18 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
 
     fn destroy_layer(
         &mut self,
-        _device: &mut SurfmanDevice,
-        _contexts: &mut dyn GLContexts<SurfmanGL>,
+        device: &mut SurfmanDevice,
+        contexts: &mut dyn GLContexts<SurfmanGL>,
         context_id: ContextId,
         layer_id: LayerId,
     ) {
         self.layers.retain(|&ids| ids != (context_id, layer_id));
-        self.openxr_layers.remove(&layer_id);
+        if let Some(layer) = self.openxr_layers.remove(&layer_id) {
+            if let Some(depth_stencil_texture) = layer.depth_stencil_texture {
+                let gl = contexts.bindings(device, context_id).unwrap();
+                gl.delete_textures(&[depth_stencil_texture]);
+            }
+        }
     }
 
     fn layers(&self) -> &[(ContextId, LayerId)] {
@@ -717,7 +758,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                         Error::BackendSpecific(format!("Layer::get_surface_texture {:?}", e))
                     })?;
                 let color_texture = device.surface_texture_object(color_surface_texture);
-                let depth_stencil_texture = None;
+                let depth_stencil_texture = openxr_layer.depth_stencil_texture;
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
                 let texture_size = openxr_layer.size;
