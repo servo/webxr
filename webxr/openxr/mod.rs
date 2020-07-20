@@ -559,10 +559,21 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         layer_id: LayerId,
     ) {
         self.layers.retain(|&ids| ids != (context_id, layer_id));
-        if let Some(layer) = self.openxr_layers.remove(&layer_id) {
+        if let Some(mut layer) = self.openxr_layers.remove(&layer_id) {
             if let Some(depth_stencil_texture) = layer.depth_stencil_texture {
                 let gl = contexts.bindings(device, context_id).unwrap();
                 gl.delete_textures(&[depth_stencil_texture]);
+            }
+            let mut context = contexts
+                .context(device, context_id)
+                .expect("missing GL context");
+            for surface_texture in mem::replace(&mut layer.surface_textures, vec![]) {
+                if let Some(surface_texture) = surface_texture {
+                    let mut surface = device
+                        .destroy_surface_texture(&mut context, surface_texture)
+                        .unwrap();
+                    device.destroy_surface(&mut context, &mut surface).unwrap();
+                }
             }
         }
     }
