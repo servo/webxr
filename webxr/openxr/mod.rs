@@ -173,19 +173,6 @@ impl<Eye> ViewInfo<Eye> {
     }
 }
 
-impl Drop for OpenXrDevice {
-    fn drop(&mut self) {
-        // This should be happening automatically in the destructors,
-        // but it isn't, presumably because there's an extra handle floating
-        // around somewhere
-        // XXXManishearth find out where that extra handle is
-        unsafe {
-            (self.instance.fp().destroy_session)(self.session.as_raw());
-            (self.instance.fp().destroy_instance)(self.instance.as_raw());
-        }
-    }
-}
-
 pub struct OpenXrDiscovery {
     context_menu_provider: Box<dyn ContextMenuProvider>,
 }
@@ -1352,6 +1339,9 @@ impl DeviceAPI for OpenXrDevice {
             thread::sleep(Duration::from_millis(30));
         }
         self.events.callback(Event::SessionEnd);
+        // We clear this data to remove the outstanding reference to XrSpace,
+        // which keeps other OpenXR objects alive.
+        *self.shared_data.lock().unwrap() = None;
     }
 
     fn set_quitter(&mut self, _: Quitter) {
