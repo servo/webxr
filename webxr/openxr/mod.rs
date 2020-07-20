@@ -173,19 +173,6 @@ impl<Eye> ViewInfo<Eye> {
     }
 }
 
-impl Drop for OpenXrDevice {
-    fn drop(&mut self) {
-        // This should be happening automatically in the destructors,
-        // but it isn't, presumably because there's an extra handle floating
-        // around somewhere
-        // XXXManishearth find out where that extra handle is
-        unsafe {
-            (self.instance.fp().destroy_session)(self.session.as_raw());
-            (self.instance.fp().destroy_instance)(self.instance.as_raw());
-        }
-    }
-}
-
 pub struct OpenXrDiscovery {
     context_menu_provider: Box<dyn ContextMenuProvider>,
 }
@@ -572,10 +559,21 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         layer_id: LayerId,
     ) {
         self.layers.retain(|&ids| ids != (context_id, layer_id));
-        if let Some(layer) = self.openxr_layers.remove(&layer_id) {
+        if let Some(mut layer) = self.openxr_layers.remove(&layer_id) {
             if let Some(depth_stencil_texture) = layer.depth_stencil_texture {
                 let gl = contexts.bindings(device, context_id).unwrap();
                 gl.delete_textures(&[depth_stencil_texture]);
+            }
+            let mut context = contexts
+                .context(device, context_id)
+                .expect("missing GL context");
+            for surface_texture in mem::replace(&mut layer.surface_textures, vec![]) {
+                if let Some(surface_texture) = surface_texture {
+                    let mut surface = device
+                        .destroy_surface_texture(&mut context, surface_texture)
+                        .unwrap();
+                    device.destroy_surface(&mut context, &mut surface).unwrap();
+                }
             }
         }
     }
@@ -1352,6 +1350,9 @@ impl DeviceAPI for OpenXrDevice {
             thread::sleep(Duration::from_millis(30));
         }
         self.events.callback(Event::SessionEnd);
+        // We clear this data to remove the outstanding reference to XrSpace,
+        // which keeps other OpenXR objects alive.
+        *self.shared_data.lock().unwrap() = None;
     }
 
     fn set_quitter(&mut self, _: Quitter) {
