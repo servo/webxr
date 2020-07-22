@@ -4,6 +4,8 @@
 
 //! An implementation of layer management using surfman
 
+use crate::gl_utils::GlClearer;
+
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::Size2D;
@@ -48,6 +50,7 @@ pub struct SurfmanLayerManager {
     surface_textures: HashMap<LayerId, SurfaceTexture>,
     depth_stencil_textures: HashMap<LayerId, GLuint>,
     viewports: Viewports,
+    clearer: GlClearer,
 }
 
 impl SurfmanLayerManager {
@@ -58,12 +61,14 @@ impl SurfmanLayerManager {
         let layers = Vec::new();
         let surface_textures = HashMap::new();
         let depth_stencil_textures = HashMap::new();
+        let clearer = GlClearer::new();
         SurfmanLayerManager {
             layers,
             swap_chains,
             surface_textures,
             depth_stencil_textures,
             viewports,
+            clearer,
         }
     }
 }
@@ -122,6 +127,8 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
         context_id: ContextId,
         layer_id: LayerId,
     ) {
+        self.clearer
+            .destroy_layer(device, contexts, context_id, layer_id);
         let context = match contexts.context(device, context_id) {
             Some(context) => context,
             None => return,
@@ -160,6 +167,7 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                     .take_surface_texture(device, context)
                     .map_err(|_| Error::NoMatchingDevice)?;
                 let color_texture = device.surface_texture_object(&surface_texture);
+                let color_target = device.surface_gl_texture_target();
                 let depth_stencil_texture = self.depth_stencil_textures.get(&layer_id).cloned();
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
@@ -181,6 +189,15 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                     })
                     .collect();
                 self.surface_textures.insert(layer_id, surface_texture);
+                self.clearer.clear(
+                    device,
+                    contexts,
+                    context_id,
+                    layer_id,
+                    color_texture,
+                    color_target,
+                    depth_stencil_texture,
+                );
                 Ok(SubImages {
                     layer_id,
                     sub_image,
