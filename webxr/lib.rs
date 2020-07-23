@@ -33,3 +33,5 @@ pub use surfman_layer_manager::SurfmanGL;
 pub use surfman_layer_manager::SurfmanLayerManager;
 pub type MainThreadRegistry = webxr_api::MainThreadRegistry<surfman_layer_manager::SurfmanGL>;
 pub type Discovery = Box<dyn webxr_api::DiscoveryAPI<SurfmanGL>>;
+
+pub(crate) mod gl_utils;

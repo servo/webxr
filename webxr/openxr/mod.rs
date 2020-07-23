@@ -1,3 +1,4 @@
+use crate::gl_utils::GlClearer;
 use crate::SurfmanGL;
 
 use euclid::Point2D;
@@ -380,6 +381,7 @@ struct OpenXrLayerManager {
     frame_stream: FrameStream<D3D11>,
     layers: Vec<(ContextId, LayerId)>,
     openxr_layers: HashMap<LayerId, OpenXrLayer>,
+    clearer: GlClearer,
 }
 
 struct OpenXrLayer {
@@ -399,12 +401,14 @@ impl OpenXrLayerManager {
     ) -> OpenXrLayerManager {
         let layers = Vec::new();
         let openxr_layers = HashMap::new();
+        let clearer = GlClearer::new();
         OpenXrLayerManager {
             session,
             shared_data,
             frame_stream,
             layers,
             openxr_layers,
+            clearer,
         }
     }
 
@@ -558,6 +562,8 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         context_id: ContextId,
         layer_id: LayerId,
     ) {
+        self.clearer
+            .destroy_layer(device, contexts, context_id, layer_id);
         self.layers.retain(|&ids| ids != (context_id, layer_id));
         if let Some(mut layer) = self.openxr_layers.remove(&layer_id) {
             if let Some(depth_stencil_texture) = layer.depth_stencil_texture {
@@ -726,6 +732,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         let data_guard = self.shared_data.lock().unwrap();
         let data = data_guard.as_ref().unwrap();
         let openxr_layers = &mut self.openxr_layers;
+        let clearer = &mut self.clearer;
         self.frame_stream
             .begin()
             .map_err(|e| Error::BackendSpecific(format!("FrameStream::begin {:?}", e)))?;
@@ -756,6 +763,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                         Error::BackendSpecific(format!("Layer::get_surface_texture {:?}", e))
                     })?;
                 let color_texture = device.surface_texture_object(color_surface_texture);
+                let color_target = device.surface_gl_texture_target();
                 let depth_stencil_texture = openxr_layer.depth_stencil_texture;
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
@@ -777,6 +785,15 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                         viewport,
                     })
                     .collect();
+                clearer.clear(
+                    device,
+                    contexts,
+                    context_id,
+                    layer_id,
+                    color_texture,
+                    color_target,
+                    depth_stencil_texture,
+                );
                 Ok(SubImages {
                     layer_id,
                     sub_image,
