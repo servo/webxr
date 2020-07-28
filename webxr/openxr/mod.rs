@@ -105,11 +105,6 @@ const VIEW_INIT: openxr::View = openxr::View {
     },
 };
 
-// Whether or not the secondary view is enabled
-// Disabled by default to reduce texture sizes
-// XXXManishearth we can make this into a pref
-const SECONDARY_VIEW_ENABLED: bool = false;
-
 // How much to downscale the view capture by.
 // This is used for performance reasons, to dedicate less texture memory to the camera.
 // Note that on an HL2 this allocates enough texture memory for "low power" mode,
@@ -193,14 +188,17 @@ pub struct CreatedInstance {
     system: SystemId,
 }
 
-pub fn create_instance(needs_hands: bool) -> Result<CreatedInstance, String> {
+pub fn create_instance(
+    needs_hands: bool,
+    needs_secondary: bool,
+) -> Result<CreatedInstance, String> {
     let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
     let supported = entry
         .enumerate_extensions()
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
     warn!("Available extensions:\n{:?}", supported);
     let mut supports_hands = needs_hands && supported.ext_hand_tracking;
-    let supports_secondary = SECONDARY_VIEW_ENABLED
+    let supports_secondary = needs_secondary
         && supported.msft_secondary_view_configuration
         && supported.msft_first_person_observer;
     let app_info = ApplicationInfo {
@@ -277,7 +275,7 @@ fn get_matching_adapter(
 }
 
 pub fn create_surfman_adapter() -> Option<SurfmanAdapter> {
-    let instance = create_instance(false).ok()?;
+    let instance = create_instance(false, false).ok()?;
     let system = instance
         .instance
         .system(FormFactor::HEAD_MOUNTED_DISPLAY)
@@ -315,13 +313,18 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
     ) -> Result<WebXrSession, Error> {
         if self.supports_session(mode) {
             let needs_hands = init.feature_requested("hand-tracking");
-            let instance = create_instance(needs_hands).map_err(|e| Error::BackendSpecific(e))?;
+            let needs_secondary =
+                init.feature_requested("secondary-views") && init.first_person_observer_view;
+            let instance = create_instance(needs_hands, needs_secondary)
+                .map_err(|e| Error::BackendSpecific(e))?;
 
             let mut supported_features = vec!["local-floor".into()];
             if instance.supports_hands {
                 supported_features.push("hand-tracking".into());
             }
-
+            if instance.supports_secondary && init.first_person_observer_view {
+                supported_features.push("secondary-views".into());
+            }
             let granted_features = init.validate(mode, &supported_features)?;
             let context_menu_provider = self.context_menu_provider.clone_object();
             xr.spawn(move |grand_manager| {

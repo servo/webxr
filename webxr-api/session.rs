@@ -52,6 +52,10 @@ pub enum SessionMode {
 pub struct SessionInit {
     pub required_features: Vec<String>,
     pub optional_features: Vec<String>,
+    /// Secondary views are enabled with the `secondary-view` feature
+    /// but for performance reasons we also ask users to enable this pref
+    /// for now.
+    pub first_person_observer_view: bool,
 }
 
 impl SessionInit {
