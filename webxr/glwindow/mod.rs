@@ -322,7 +322,11 @@ impl DeviceAPI for GlWindowDevice {
             Some(target_swap_chain) => {
                 // Rendering to a surfman swap chain
                 target_swap_chain
-                    .swap_buffers(&mut self.device, &mut self.context)
+                    .swap_buffers(
+                        &mut self.device,
+                        &mut self.context,
+                        surfman_chains::PreserveBuffer::No,
+                    )
                     .unwrap();
             }
             None => {
