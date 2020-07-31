@@ -42,7 +42,7 @@ openxr = { git = "https://github.com/servo/openxrs.git", branch="secondary-views
 serde = { version = "1.0", optional = true }
 sparkle = "0.1"
 surfman = { version = "0.3", features = ["sm-x11"] }
-surfman-chains = "0.4"
+surfman-chains = "0.5"
 time = "0.1.42"
 
 [target.'cfg(target_os = "windows")'.dependencies]
