@@ -276,7 +276,7 @@ impl DeviceAPI for GlWindowDevice {
             (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
         );
 
-        self.gl.clear_color(0.2, 0.3, 0.3, 1.0);
+        self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
         self.gl.clear(gl::COLOR_BUFFER_BIT);
         debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
@@ -434,6 +434,14 @@ impl GlWindowDevice {
         debug_assert_eq!(
             (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
             (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+        );
+
+        gl.enable(gl::BLEND);
+        gl.blend_func_separate(
+            gl::SRC_ALPHA,
+            gl::ONE_MINUS_SRC_ALPHA,
+            gl::ONE,
+            gl::ONE_MINUS_SRC_ALPHA,
         );
 
         let swap_chains = SwapChains::new();
