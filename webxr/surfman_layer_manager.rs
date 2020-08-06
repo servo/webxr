@@ -233,7 +233,7 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                 .recycle_surface_texture(device, context, surface_texture)
                 .map_err(|err| Error::BackendSpecific(format!("{:?}", err)))?;
             swap_chain
-                .swap_buffers(device, context)
+                .swap_buffers(device, context, surfman_chains::PreserveBuffer::No)
                 .map_err(|err| Error::BackendSpecific(format!("{:?}", err)))?;
         }
         Ok(())
