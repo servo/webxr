@@ -21,6 +21,8 @@ build = "build.rs"
 path = "lib.rs"
 
 [features]
+default = ["x11"]
+x11 = ["surfman/sm-x11"]
 angle = ["surfman/sm-angle"]
 egl = []
 gles = []
@@ -41,7 +43,7 @@ gvr-sys = { version = "0.7", optional = true }
 openxr = { git = "https://github.com/servo/openxrs.git", branch="secondary-views-2", optional = true }
 serde = { version = "1.0", optional = true }
 sparkle = "0.1"
-surfman = { version = "0.3", features = ["sm-x11"] }
+surfman = "0.3"
 surfman-chains = "0.5"
 time = "0.1.42"
 
