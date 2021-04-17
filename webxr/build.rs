@@ -42,7 +42,7 @@ fn main() {
     if cfg!(feature = "magicleap") {
         let mut builder = bindgen::Builder::default()
             .header("magicleap/magicleap_c_api.h")
-            .blacklist_type("MLResult")
+            .blocklist_type("MLResult")
             .size_t_is_usize(true)
             .derive_default(true)
             .rustfmt_bindings(true);
