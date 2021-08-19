@@ -7,4 +7,5 @@ members = [
 [patch.crates-io]
 # TODO(bryce): Remove this when the PR is merged: https://github.com/servo/surfman/pull/234
 surfman = { git = "https://github.com/Bryce-MW/surfman", branch = "euclid-update" }
-surfman-chains = { git = "https://github.com/Bryce-MW/surfman", branch = "euclid-update" }
+# TODO(bryce): Remove this  when the PR is merged: https://github.com/asajeffrey/surfman-chains/pull/12
+surfman-chains = { git = "https://github.com/Bryce-MW/surfman-chains", branch = "euclid-update" }
