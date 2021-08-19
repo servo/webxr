@@ -234,7 +234,7 @@ impl DeviceAPI for GlWindowDevice {
             RigidTransform3D::from_translation(translation);
         let rotation = Rotation3D::from_untyped(&self.window.get_rotation());
         let rotation = RigidTransform3D::from_rotation(rotation);
-        let transform = translation.post_transform(&rotation);
+        let transform = translation.then(&rotation);
         let sub_images = self.layer_manager().ok()?.begin_frame(layers).ok()?;
         Some(Frame {
             pose: Some(ViewerPose {
@@ -606,7 +606,7 @@ impl GlWindowDevice {
         let transform: RigidTransform3D<f32, Viewer, Eye> =
             RigidTransform3D::new(rotation, translation);
         View {
-            transform: viewer.pre_transform(&transform.inverse()),
+            transform: transform.inverse().then(&viewer),
             projection,
         }
     }
@@ -630,7 +630,7 @@ impl GlWindowDevice {
         {
             #[rustfmt::skip]
             // Sigh, row-major vs column-major
-            return Transform3D::row_major(
+            return Transform3D::new(
                 f / aspect, 0.0, 0.0,                   0.0,
                 0.0,        f,   0.0,                   0.0,
                 0.0,        0.0, (far + near) * nf,     -1.0,
