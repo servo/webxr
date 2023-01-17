@@ -216,7 +216,7 @@ fn view<Eye>(
     };
 
     View {
-        transform: viewer.pre_transform(&init.transform.inverse()),
+        transform: init.transform.inverse().then(&viewer),
         projection,
     }
 }
@@ -560,11 +560,11 @@ impl HeadlessDeviceData {
                 .cast_unit(),
             BaseSpace::Joint(..) => panic!("Cannot request mocking backend with hands"),
         };
-        let space_origin = origin.pre_transform(&space.offset);
+        let space_origin = space.offset.then(&origin);
 
         let origin_rigid: RigidTransform3D<f32, ApiSpace, ApiSpace> = ray.origin.into();
         Some(Ray {
-            origin: origin_rigid.post_transform(&space_origin).translation,
+            origin: origin_rigid.then(&space_origin).translation,
             direction: space_origin.rotation.transform_vector3d(ray.direction),
         })
     }
