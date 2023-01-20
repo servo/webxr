@@ -107,7 +107,7 @@ pub fn frustum_to_projection_matrix<T, U>(
     let h = top - bottom;
     let d = far - near;
 
-    Transform3D::column_major(
+    Transform3D::new(
         2. * near / w,
         0.,
         (right + left) / w,

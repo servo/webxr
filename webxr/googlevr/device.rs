@@ -441,7 +441,7 @@ impl GoogleVRDevice {
         // only translation
         let transform: RigidTransform3D<f32, Viewer, Eye> = decompose_rigid(&eye_mat);
 
-        let transform = viewer.pre_transform(&transform.inverse());
+        let transform = transform.inverse().then(&viewer);
 
         View {
             projection,
