@@ -4,5 +4,3 @@ members = [
     "webxr-api"
 ]
 
-[patch.crates-io]
-surfman-chains = { git = "https://github.com/servo/surfman-chains.git" }
