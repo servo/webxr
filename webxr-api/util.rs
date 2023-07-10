@@ -107,22 +107,23 @@ pub fn frustum_to_projection_matrix<T, U>(
     let h = top - bottom;
     let d = far - near;
 
+    // Column-major order
     Transform3D::new(
         2. * near / w,
         0.,
-        (right + left) / w,
+        0.,
         0.,
         0.,
         2. * near / h,
+        0.,
+        0.,
+        (right + left) / w,
         (top + bottom) / h,
-        0.,
-        0.,
-        0.,
         -(far + near) / d,
-        -2. * far * near / d,
-        0.,
-        0.,
         -1.,
+        0.,
+        0.,
+        -2. * far * near / d,
         0.,
     )
 }
