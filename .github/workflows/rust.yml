@@ -2,7 +2,7 @@ name: Rust
 
 on: 
   push:
-    branches-ignore: "master"
+    branches: [master]
   pull_request:
   merge_group:
     types: [checks_requested]
