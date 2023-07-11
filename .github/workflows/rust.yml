@@ -4,20 +4,22 @@ on:
   push:
     branches-ignore: "master"
   pull_request:
+  merge_group:
+    types: [checks_requested]
 
 env:
   SHELL: /bin/bash
 
 jobs:
   fmt:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - uses: dtolnay/rust-toolchain@stable
     - name: fmt check
       run: cargo fmt --all -- --check
   linux:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - uses: dtolnay/rust-toolchain@stable
@@ -54,7 +56,7 @@ jobs:
         rustup target add aarch64-pc-windows-msvc
         cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
   build_result:
-    name: homu build finished
+    name: Result
     runs-on: ubuntu-latest
     needs: ["mac", "linux", "win", "fmt"]
     steps:
