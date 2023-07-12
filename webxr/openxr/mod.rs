@@ -170,11 +170,11 @@ impl<Eye> ViewInfo<Eye> {
 }
 
 pub struct OpenXrDiscovery {
-    context_menu_provider: Box<dyn ContextMenuProvider>,
+    context_menu_provider: Option<Box<dyn ContextMenuProvider>>,
 }
 
 impl OpenXrDiscovery {
-    pub fn new(context_menu_provider: Box<dyn ContextMenuProvider>) -> Self {
+    pub fn new(context_menu_provider: Option<Box<dyn ContextMenuProvider>>) -> Self {
         Self {
             context_menu_provider,
         }
@@ -326,7 +326,7 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
                 supported_features.push("secondary-views".into());
             }
             let granted_features = init.validate(mode, &supported_features)?;
-            let context_menu_provider = self.context_menu_provider.clone_object();
+            let context_menu_provider = self.context_menu_provider.take();
             xr.spawn(move |grand_manager| {
                 OpenXrDevice::new(
                     instance,
@@ -361,7 +361,7 @@ struct OpenXrDevice {
     right_hand: OpenXRInput,
     left_hand: OpenXRInput,
     granted_features: Vec<String>,
-    context_menu_provider: Box<dyn ContextMenuProvider>,
+    context_menu_provider: Option<Box<dyn ContextMenuProvider>>,
     context_menu_future: Option<Box<dyn ContextMenuFuture>>,
 }
 
@@ -824,7 +824,7 @@ impl OpenXrDevice {
     fn new(
         instance: CreatedInstance,
         granted_features: Vec<String>,
-        context_menu_provider: Box<dyn ContextMenuProvider>,
+        context_menu_provider: Option<Box<dyn ContextMenuProvider>>,
         grand_manager: LayerGrandManager<SurfmanGL>,
     ) -> Result<OpenXrDevice, Error> {
         let CreatedInstance {
@@ -1260,20 +1260,22 @@ impl DeviceAPI for OpenXrDevice {
         data.frame_state = Some(frame_state);
         let views = data.views();
 
-        if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
-            self.context_menu_future = Some(self.context_menu_provider.open_context_menu());
-        } else if self.context_menu_future.is_some() {
-            // Do not surface input info whilst the context menu is open
-            // We don't do this for the first frame after the context menu is opened
-            // so that the appropriate select cancel events may fire
-            right.frame.target_ray_origin = None;
-            right.frame.grip_origin = None;
-            left.frame.target_ray_origin = None;
-            left.frame.grip_origin = None;
-            right.select = None;
-            right.squeeze = None;
-            left.select = None;
-            left.squeeze = None;
+        if let Some(ref context_menu_provider) = self.context_menu_provider {
+            if (left.menu_selected || right.menu_selected) && self.context_menu_future.is_none() {
+                self.context_menu_future = Some(context_menu_provider.open_context_menu());
+            } else if self.context_menu_future.is_some() {
+                // Do not surface input info whilst the context menu is open
+                // We don't do this for the first frame after the context menu is opened
+                // so that the appropriate select cancel events may fire
+                right.frame.target_ray_origin = None;
+                right.frame.grip_origin = None;
+                left.frame.target_ray_origin = None;
+                left.frame.grip_origin = None;
+                right.select = None;
+                right.squeeze = None;
+                left.select = None;
+                left.squeeze = None;
+            }
         }
 
         let frame = Frame {
