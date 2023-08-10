@@ -5,35 +5,15 @@
 //! An implementation of layer management using surfman
 
 use crate::gl_utils::GlClearer;
-
-use euclid::Point2D;
-use euclid::Rect;
-use euclid::Size2D;
-
-use sparkle::gl;
-use sparkle::gl::GLuint;
-use sparkle::gl::Gl;
-
+use euclid::{Point2D, Rect, Size2D};
+use sparkle::gl::{self, GLuint, Gl};
 use std::collections::HashMap;
-
-use surfman::Context as SurfmanContext;
-use surfman::Device as SurfmanDevice;
-use surfman::SurfaceAccess;
-use surfman::SurfaceTexture;
-
-use surfman_chains::SwapChains;
-use surfman_chains::SwapChainsAPI;
-
-use webxr_api::ContextId;
-use webxr_api::Error;
-use webxr_api::GLContexts;
-use webxr_api::GLTypes;
-use webxr_api::LayerId;
-use webxr_api::LayerInit;
-use webxr_api::LayerManagerAPI;
-use webxr_api::SubImage;
-use webxr_api::SubImages;
-use webxr_api::Viewports;
+use surfman::chains::{PreserveBuffer, SwapChains, SwapChainsAPI};
+use surfman::{Context as SurfmanContext, Device as SurfmanDevice, SurfaceAccess, SurfaceTexture};
+use webxr_api::{
+    ContextId, Error, GLContexts, GLTypes, LayerId, LayerInit, LayerManagerAPI, SubImage,
+    SubImages, Viewports,
+};
 
 #[derive(Copy, Clone, Debug)]
 pub enum SurfmanGL {}
@@ -233,7 +213,7 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                 .recycle_surface_texture(device, context, surface_texture)
                 .map_err(|err| Error::BackendSpecific(format!("{:?}", err)))?;
             swap_chain
-                .swap_buffers(device, context, surfman_chains::PreserveBuffer::No)
+                .swap_buffers(device, context, PreserveBuffer::No)
                 .map_err(|err| Error::BackendSpecific(format!("{:?}", err)))?;
         }
         Ok(())

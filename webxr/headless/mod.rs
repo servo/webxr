@@ -4,62 +4,19 @@
 
 use crate::SurfmanGL;
 use crate::SurfmanLayerManager;
-
-use webxr_api::util::{self, ClipPlanes, HitTestList};
-use webxr_api::ApiSpace;
-use webxr_api::BaseSpace;
-use webxr_api::ContextId;
-use webxr_api::DeviceAPI;
-use webxr_api::DiscoveryAPI;
-use webxr_api::Error;
-use webxr_api::Event;
-use webxr_api::EventBuffer;
-use webxr_api::Floor;
-use webxr_api::Frame;
-use webxr_api::FrameUpdateEvent;
-use webxr_api::HitTestId;
-use webxr_api::HitTestResult;
-use webxr_api::HitTestSource;
-use webxr_api::Input;
-use webxr_api::InputFrame;
-use webxr_api::InputId;
-use webxr_api::InputSource;
-use webxr_api::LayerGrandManager;
-use webxr_api::LayerId;
-use webxr_api::LayerInit;
-use webxr_api::LayerManager;
-use webxr_api::MockDeviceInit;
-use webxr_api::MockDeviceMsg;
-use webxr_api::MockDiscoveryAPI;
-use webxr_api::MockInputMsg;
-use webxr_api::MockViewInit;
-use webxr_api::MockViewsInit;
-use webxr_api::MockWorld;
-use webxr_api::Native;
-use webxr_api::Quitter;
-use webxr_api::Ray;
-use webxr_api::Receiver;
-use webxr_api::SelectEvent;
-use webxr_api::SelectKind;
-use webxr_api::Sender;
-use webxr_api::Session;
-use webxr_api::SessionBuilder;
-use webxr_api::SessionInit;
-use webxr_api::SessionMode;
-use webxr_api::Space;
-use webxr_api::SubImages;
-use webxr_api::View;
-use webxr_api::Viewer;
-use webxr_api::ViewerPose;
-use webxr_api::Viewports;
-use webxr_api::Views;
-
 use euclid::RigidTransform3D;
-
 use std::sync::{Arc, Mutex};
 use std::thread;
-
-use surfman_chains::SwapChains;
+use surfman::chains::SwapChains;
+use webxr_api::util::{self, ClipPlanes, HitTestList};
+use webxr_api::{
+    ApiSpace, BaseSpace, ContextId, DeviceAPI, DiscoveryAPI, Error, Event, EventBuffer, Floor,
+    Frame, FrameUpdateEvent, HitTestId, HitTestResult, HitTestSource, Input, InputFrame, InputId,
+    InputSource, LayerGrandManager, LayerId, LayerInit, LayerManager, MockDeviceInit,
+    MockDeviceMsg, MockDiscoveryAPI, MockInputMsg, MockViewInit, MockViewsInit, MockWorld, Native,
+    Quitter, Ray, Receiver, SelectEvent, SelectKind, Sender, Session, SessionBuilder, SessionInit,
+    SessionMode, Space, SubImages, View, Viewer, ViewerPose, Viewports, Views,
+};
 
 pub struct HeadlessMockDiscovery {}
 

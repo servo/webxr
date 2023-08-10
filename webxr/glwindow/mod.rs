@@ -2,78 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::SurfmanGL;
-use crate::SurfmanLayerManager;
-
-use euclid::Angle;
-use euclid::Point2D;
-use euclid::Rect;
-use euclid::RigidTransform3D;
-use euclid::Rotation3D;
-use euclid::Size2D;
-use euclid::Transform3D;
-use euclid::UnknownUnit;
-use euclid::Vector3D;
-
-use sparkle::gl;
-use sparkle::gl::GLuint;
-use sparkle::gl::Gl;
-
+use crate::{SurfmanGL, SurfmanLayerManager};
+use euclid::{
+    Angle, Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, UnknownUnit, Vector3D,
+};
+use sparkle::gl::{self, GLuint, Gl};
 use std::ffi::c_void;
 use std::rc::Rc;
-
-use surfman::Adapter;
-use surfman::Connection;
-use surfman::Context as SurfmanContext;
-use surfman::ContextAttributes;
-use surfman::Device as SurfmanDevice;
-use surfman::GLApi;
-use surfman::NativeWidget;
-use surfman::SurfaceAccess;
-use surfman::SurfaceType;
-
-use surfman_chains::SwapChain;
-use surfman_chains::SwapChainAPI;
-use surfman_chains::SwapChains;
-use surfman_chains::SwapChainsAPI;
-
+use surfman::chains::{PreserveBuffer, SwapChain, SwapChainAPI, SwapChains, SwapChainsAPI};
+use surfman::{
+    Adapter, Connection, Context as SurfmanContext, ContextAttributes, Device as SurfmanDevice,
+    GLApi, NativeWidget, SurfaceAccess, SurfaceType,
+};
 use webxr_api::util::ClipPlanes;
-use webxr_api::ContextId;
-use webxr_api::DeviceAPI;
-use webxr_api::DiscoveryAPI;
-use webxr_api::Display;
-use webxr_api::Error;
-use webxr_api::Event;
-use webxr_api::EventBuffer;
-use webxr_api::Floor;
-use webxr_api::Frame;
-use webxr_api::InputSource;
-use webxr_api::LayerGrandManager;
-use webxr_api::LayerId;
-use webxr_api::LayerInit;
-use webxr_api::LayerManager;
-use webxr_api::Native;
-use webxr_api::Quitter;
-use webxr_api::Sender;
-use webxr_api::Session;
-use webxr_api::SessionBuilder;
-use webxr_api::SessionInit;
-use webxr_api::SessionMode;
-use webxr_api::SomeEye;
-use webxr_api::View;
-use webxr_api::Viewer;
-use webxr_api::ViewerPose;
-use webxr_api::Viewport;
-use webxr_api::Viewports;
-use webxr_api::Views;
-use webxr_api::CUBE_BACK;
-use webxr_api::CUBE_BOTTOM;
-use webxr_api::CUBE_LEFT;
-use webxr_api::CUBE_RIGHT;
-use webxr_api::CUBE_TOP;
-use webxr_api::LEFT_EYE;
-use webxr_api::RIGHT_EYE;
-use webxr_api::VIEWER;
+use webxr_api::{
+    ContextId, DeviceAPI, DiscoveryAPI, Display, Error, Event, EventBuffer, Floor, Frame,
+    InputSource, LayerGrandManager, LayerId, LayerInit, LayerManager, Native, Quitter, Sender,
+    Session, SessionBuilder, SessionInit, SessionMode, SomeEye, View, Viewer, ViewerPose, Viewport,
+    Viewports, Views, CUBE_BACK, CUBE_BOTTOM, CUBE_LEFT, CUBE_RIGHT, CUBE_TOP, LEFT_EYE, RIGHT_EYE,
+    VIEWER,
+};
 
 // How far off the ground are the viewer's eyes?
 const HEIGHT: f32 = 1.0;
@@ -322,11 +270,7 @@ impl DeviceAPI for GlWindowDevice {
             Some(target_swap_chain) => {
                 // Rendering to a surfman swap chain
                 target_swap_chain
-                    .swap_buffers(
-                        &mut self.device,
-                        &mut self.context,
-                        surfman_chains::PreserveBuffer::No,
-                    )
+                    .swap_buffers(&mut self.device, &mut self.context, PreserveBuffer::No)
                     .unwrap();
             }
             None => {
