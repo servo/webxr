@@ -2,63 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use webxr_api::util::{self, ClipPlanes};
-use webxr_api::ContextId;
-use webxr_api::DeviceAPI;
-use webxr_api::Error;
-use webxr_api::Event;
-use webxr_api::EventBuffer;
-use webxr_api::Floor;
-use webxr_api::Frame;
-use webxr_api::InputFrame;
-use webxr_api::InputId;
-use webxr_api::InputSource;
-use webxr_api::LayerGrandManager;
-use webxr_api::LayerId;
-use webxr_api::LayerInit;
-use webxr_api::LayerManager;
-use webxr_api::Native;
-use webxr_api::Quitter;
-use webxr_api::Sender;
-use webxr_api::TargetRayMode;
-use webxr_api::View;
-use webxr_api::Viewer;
-use webxr_api::ViewerPose;
-use webxr_api::Viewports;
-use webxr_api::Views;
-
-use crate::gles as gl;
-use crate::SurfmanGL;
-use crate::SurfmanLayerManager;
-
-use euclid::default::Size2D as DefaultSize2D;
-use euclid::Point2D;
-use euclid::Rect;
-use euclid::RigidTransform3D;
-use euclid::Rotation3D;
-use euclid::Size2D;
-use euclid::Transform3D;
-use euclid::Vector3D;
-
-use gvr_sys as gvr;
-use gvr_sys::gvr_color_format_type::*;
-use gvr_sys::gvr_depth_stencil_format_type::*;
-use gvr_sys::gvr_feature::*;
-
-use log::warn;
-
-use std::{mem, ptr};
-
 use super::discovery::SendPtr;
 use super::input::GoogleVRController;
-
-use surfman::Connection as SurfmanConnection;
-use surfman::Context as SurfmanContext;
-use surfman::Device as SurfmanDevice;
-
-use surfman_chains::SwapChainAPI;
-use surfman_chains::SwapChains;
-use surfman_chains::SwapChainsAPI;
+use crate::gles as gl;
+use crate::{SurfmanGL, SurfmanLayerManager};
+use euclid::default::Size2D as DefaultSize2D;
+use euclid::{Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, Vector3D};
+use gvr_sys::{
+    self as gvr, gvr_color_format_type::*, gvr_depth_stencil_format_type::*, gvr_feature::*,
+};
+use log::warn;
+use std::{mem, ptr};
+use surfman::chains::{SwapChainAPI, SwapChains, SwapChainsAPI};
+use surfman::{
+    Connection as SurfmanConnection, Context as SurfmanContext, Device as SurfmanDevice,
+};
+use webxr_api::util::{self, ClipPlanes};
+use webxr_api::{
+    ContextId, DeviceAPI, Error, Event, EventBuffer, Floor, Frame, InputFrame, InputId,
+    InputSource, LayerGrandManager, LayerId, LayerInit, LayerManager, Native, Quitter, Sender,
+    TargetRayMode, View, Viewer, ViewerPose, Viewports, Views,
+};
 
 #[cfg(target_os = "android")]
 use crate::jni_utils::JNIScope;
