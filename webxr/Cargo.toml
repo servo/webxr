@@ -54,5 +54,5 @@ wio = { version = "0.2", optional = true }
 android_injected_glue = { version = "0.2.2", optional = true }
 
 [build-dependencies]
-gl_generator = "0.13"
-bindgen = "0.62"
+gl_generator = "0.14"
+bindgen = "0.66"
