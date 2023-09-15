@@ -45,7 +45,7 @@ fn main() {
             .blocklist_type("MLResult")
             .size_t_is_usize(true)
             .derive_default(true)
-            .rustfmt_bindings(true);
+            .formatter(bindgen::Formatter::Rustfmt);
 
         if let Ok(mlsdk) = env::var("MAGICLEAP_SDK") {
             builder = builder.clang_args(&[
