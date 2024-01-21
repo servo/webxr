@@ -341,7 +341,26 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
     }
 
     fn supports_session(&self, mode: SessionMode) -> bool {
-        mode == SessionMode::ImmersiveAR || mode == SessionMode::ImmersiveVR
+        let mut supports = false;
+        // Determining AR support requires enumerating environment blend modes,
+        // but this requires an already created XrInstance and SystemId.
+        // We'll make a "default" instance here to check the blend modes,
+        // then a proper one in request_session with hands/secondary support if needed.
+        if let Ok(instance) = create_instance(false, false) {
+            if let Ok(blend_modes) = instance.instance.enumerate_environment_blend_modes(
+                instance.system,
+                ViewConfigurationType::PRIMARY_STEREO,
+            ) {
+                if mode == SessionMode::ImmersiveAR {
+                    supports = blend_modes.contains(&EnvironmentBlendMode::ADDITIVE)
+                        || blend_modes.contains(&EnvironmentBlendMode::ALPHA_BLEND);
+                } else if mode == SessionMode::ImmersiveVR {
+                    // Immersive VR sessions are not precluded by non-opaque blending
+                    supports = blend_modes.len() > 0;
+                }
+            }
+        }
+        supports
     }
 }
 
