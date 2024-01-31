@@ -9,7 +9,7 @@ use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
 use log::{error, warn};
-use openxr::d3d::{Requirements, SessionCreateInfo, D3D11};
+use openxr::d3d::{Requirements, SessionCreateInfoD3D11, D3D11};
 use openxr::Graphics;
 use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
@@ -73,6 +73,7 @@ use webxr_api::Visibility;
 use winapi::shared::dxgi;
 use winapi::shared::dxgiformat;
 use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
+use winapi::um::d3d11::ID3D11Texture2D;
 use winapi::Interface;
 use wio::com::ComPtr;
 
@@ -192,7 +193,7 @@ pub fn create_instance(
     needs_hands: bool,
     needs_secondary: bool,
 ) -> Result<CreatedInstance, String> {
-    let entry = Entry::load().map_err(|e| format!("Entry::load {:?}", e))?;
+    let entry = unsafe { Entry::load().map_err(|e| format!("Entry::load {:?}", e))? };
     let supported = entry
         .enumerate_extensions()
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
@@ -454,7 +455,7 @@ impl OpenXrLayerManager {
 
         unsafe {
             instance
-                .create_session::<D3D11>(system, &SessionCreateInfo { device: d3d_device })
+                .create_session::<D3D11>(system, &SessionCreateInfoD3D11 { device: d3d_device as *mut _ })
                 .map_err(|e| Error::BackendSpecific(format!("Instance::create_session {:?}", e)))
         }
     }
@@ -496,7 +497,7 @@ impl OpenXrLayer {
             return Ok(result);
         }
         unsafe {
-            let image = ComPtr::from_raw(self.images[index]);
+            let image = ComPtr::from_raw(self.images[index] as *mut ID3D11Texture2D);
             image.AddRef();
             let surface_texture = device.create_surface_texture_from_texture(
                 context,
@@ -1215,7 +1216,7 @@ impl DeviceAPI for OpenXrDevice {
         let sub_images = self.layer_manager.begin_frame(layers).ok()?;
 
         let mut guard = self.shared_data.lock().unwrap();
-        let mut data = guard.as_mut().unwrap();
+        let data = guard.as_mut().unwrap();
         let time_ns = time::precise_time_ns();
 
         // XXXManishearth should we check frame_state.should_render?
