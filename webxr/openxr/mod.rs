@@ -455,7 +455,12 @@ impl OpenXrLayerManager {
 
         unsafe {
             instance
-                .create_session::<D3D11>(system, &SessionCreateInfoD3D11 { device: d3d_device as *mut _ })
+                .create_session::<D3D11>(
+                    system,
+                    &SessionCreateInfoD3D11 {
+                        device: d3d_device as *mut _,
+                    },
+                )
                 .map_err(|e| Error::BackendSpecific(format!("Instance::create_session {:?}", e)))
         }
     }
