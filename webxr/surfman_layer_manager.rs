@@ -41,7 +41,7 @@ impl SurfmanLayerManager {
         let layers = Vec::new();
         let surface_textures = HashMap::new();
         let depth_stencil_textures = HashMap::new();
-        let clearer = GlClearer::new();
+        let clearer = GlClearer::new(false);
         SurfmanLayerManager {
             layers,
             swap_chains,
