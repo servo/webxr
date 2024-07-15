@@ -15,12 +15,13 @@ use webxr_api::LayerId;
 // A utility to clear a color texture and optional depth/stencil texture
 pub(crate) struct GlClearer {
     fbos: HashMap<(LayerId, GLuint, Option<GLuint>), GLuint>,
+    should_reverse_winding: bool,
 }
 
 impl GlClearer {
-    pub(crate) fn new() -> GlClearer {
+    pub(crate) fn new(should_reverse_winding: bool) -> GlClearer {
         let fbos = HashMap::new();
-        GlClearer { fbos }
+        GlClearer { fbos, should_reverse_winding }
     }
 
     fn fbo(
@@ -31,6 +32,7 @@ impl GlClearer {
         color_target: GLuint,
         depth_stencil: Option<GLuint>,
     ) -> GLuint {
+        let should_reverse_winding = self.should_reverse_winding;
         *self
             .fbos
             .entry((layer_id, color, depth_stencil))
@@ -60,6 +62,12 @@ impl GlClearer {
                     depth_stencil.unwrap_or(0),
                     0,
                 );
+
+                // Necessary if using an OpenXR runtime that does not support mutable FOV,
+                // as flipping the projection matrix necessitates reversing the winding order.
+                if should_reverse_winding {
+                    gl.front_face(gl::CW);
+                }
 
                 // Restore the GL state
                 gl.bind_framebuffer(gl::DRAW_FRAMEBUFFER, bound_fbos[0] as GLuint);

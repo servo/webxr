@@ -187,6 +187,7 @@ pub struct CreatedInstance {
     supports_hands: bool,
     supports_secondary: bool,
     system: SystemId,
+    supports_mutable_fov: bool,
 }
 
 pub fn create_instance(
@@ -233,11 +234,19 @@ pub fn create_instance(
             .map_err(|e| format!("Instance::supports_hand_tracking {:?}", e))?;
     }
 
+    let supports_mutable_fov = {
+        let properties = instance
+            .view_configuration_properties(system, ViewConfigurationType::PRIMARY_STEREO)
+            .map_err(|e| format!("Instance::view_configuration_properties {:?}", e))?;
+        properties.fov_mutable
+    };
+
     Ok(CreatedInstance {
         instance,
         supports_hands,
         supports_secondary,
         system,
+        supports_mutable_fov,
     })
 }
 
@@ -375,6 +384,7 @@ struct OpenXrDevice {
     shared_data: Arc<Mutex<Option<SharedData>>>,
     clip_planes: ClipPlanes,
     supports_secondary: bool,
+    supports_mutable_fov: bool,
 
     // input
     action_set: ActionSet,
@@ -421,10 +431,11 @@ impl OpenXrLayerManager {
         session: Arc<Session<D3D11>>,
         shared_data: Arc<Mutex<Option<SharedData>>>,
         frame_stream: FrameStream<D3D11>,
+        should_reverse_winding: bool,
     ) -> OpenXrLayerManager {
         let layers = Vec::new();
         let openxr_layers = HashMap::new();
-        let clearer = GlClearer::new();
+        let clearer = GlClearer::new(should_reverse_winding);
         OpenXrLayerManager {
             session,
             shared_data,
@@ -639,6 +650,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         let openxr_layers = &self.openxr_layers;
 
         // Invert the up/down angles so that openxr flips the texture in the y axis.
+        // This has no effect in runtimes that don't support fovMutable
         let mut l_fov = data.left.view.fov;
         let mut r_fov = data.right.view.fov;
         std::mem::swap(&mut l_fov.angle_up, &mut l_fov.angle_down);
@@ -857,6 +869,7 @@ impl OpenXrDevice {
             supports_hands,
             supports_secondary,
             system,
+            supports_mutable_fov,
         } = instance;
 
         let (init_tx, init_rx) = crossbeam_channel::unbounded();
@@ -877,6 +890,7 @@ impl OpenXrDevice {
                 session,
                 shared_data_clone,
                 frame_stream,
+                !supports_mutable_fov,
             ))
         })?;
 
@@ -1038,6 +1052,7 @@ impl OpenXrDevice {
             viewer_space,
             clip_planes: Default::default(),
             supports_secondary,
+            supports_mutable_fov,
             layer_manager,
             shared_data,
 
@@ -1225,7 +1240,7 @@ impl DeviceAPI for OpenXrDevice {
         let time_ns = time::precise_time_ns();
 
         // XXXManishearth should we check frame_state.should_render?
-        let (_view_flags, views) = match self.session.locate_views(
+        let (_view_flags, mut views) = match self.session.locate_views(
             ViewConfigurationType::PRIMARY_STEREO,
             frame_state.predicted_display_time,
             &data.space,
@@ -1236,6 +1251,11 @@ impl DeviceAPI for OpenXrDevice {
                 return None;
             }
         };
+        if !self.supports_mutable_fov {
+            views.iter_mut().for_each(|v| {
+                std::mem::swap(&mut v.fov.angle_up, &mut v.fov.angle_down);
+            });
+        }
         data.left.set_view(views[0], self.clip_planes);
         data.right.set_view(views[1], self.clip_planes);
         let pose = match self
