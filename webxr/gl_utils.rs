@@ -21,7 +21,10 @@ pub(crate) struct GlClearer {
 impl GlClearer {
     pub(crate) fn new(should_reverse_winding: bool) -> GlClearer {
         let fbos = HashMap::new();
-        GlClearer { fbos, should_reverse_winding }
+        GlClearer {
+            fbos,
+            should_reverse_winding,
+        }
     }
 
     fn fbo(
