@@ -6,16 +6,13 @@ edition = "2018"
 
 homepage = "https://github.com/servo/webxr"
 repository = "https://github.com/servo/webxr"
-keywords = ["webxr", "openvr", "oculus", "magicleap", "headset", "vr", "ar"]
+keywords = ["webxr", "openxr", "oculus", "headset", "vr", "ar"]
 license = "MPL-2.0"
 
 description = '''A safe Rust API that provides a way to interact with
-Virtual Reality and Augmented Reality devices and integration with
-vendor-specific APIs like OpenVR, Oculus, GoogleVR and Magic Leap. The
-API is inspired by the WebXR Device API (https://www.w3.org/TR/webxr/)
+Virtual Reality and Augmented Reality devices and integration with OpenXR.
+The API is inspired by the WebXR Device API (https://www.w3.org/TR/webxr/)
 but adapted to Rust design patterns.'''
-
-build = "build.rs"
 
 [lib]
 path = "lib.rs"
@@ -24,13 +21,9 @@ path = "lib.rs"
 default = ["x11"]
 x11 = ["surfman/sm-x11"]
 angle = ["surfman/sm-angle"]
-egl = []
-gles = []
 glwindow = []
 headless = []
 ipc = ["webxr-api/ipc", "serde"]
-googlevr = ["gvr-sys", "android_injected_glue", "gles"]
-magicleap = ["egl"]
 openxr-api = ["angle", "openxr", "winapi", "wio", "surfman/sm-angle-default"]
 profile = ["webxr-api/profile"]
 
@@ -39,7 +32,6 @@ webxr-api = { path = "../webxr-api" }
 crossbeam-channel = "0.5"
 euclid = "0.22"
 log = "0.4.6"
-gvr-sys = { version = "0.7", optional = true }
 openxr = { version = "0.18", optional = true }
 serde = { version = "1.0", optional = true }
 sparkle = "0.1"
@@ -49,10 +41,3 @@ time = "0.1.42"
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["dxgi", "d3d11", "winerror"], optional = true }
 wio = { version = "0.2", optional = true }
-
-[target.'cfg(target_os = "android")'.dependencies]
-android_injected_glue = { version = "0.2.2", optional = true }
-
-[build-dependencies]
-gl_generator = "0.14"
-bindgen = "0.69"

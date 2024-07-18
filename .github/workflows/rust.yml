@@ -26,11 +26,9 @@ jobs:
     - name: build
       run: |
         cd webxr
-        cargo build --features=glwindow,headless,googlevr
-        cargo build --features=ipc,glwindow,headless,googlevr
+        cargo build --features=glwindow,headless
+        cargo build --features=ipc,glwindow,headless
         cargo build --features=glwindow,headless,profile
-        rustup target add arm-linux-androideabi
-        cargo build --target arm-linux-androideabi --features=ipc,googlevr
   mac:
     runs-on: macos-latest
     steps:
@@ -39,8 +37,8 @@ jobs:
     - name: build
       run: |
         cd webxr
-        cargo build --features=glwindow,headless,googlevr
-        cargo build --features=ipc,glwindow,headless,googlevr
+        cargo build --features=glwindow,headless
+        cargo build --features=ipc,glwindow,headless
         cargo build --features=glwindow,headless,profile
   win:
     runs-on: windows-latest
@@ -50,8 +48,8 @@ jobs:
     - name: build
       run: |
         cd webxr
-        cargo build --features=glwindow,headless,googlevr
-        cargo build --features=ipc,glwindow,headless,googlevr
+        cargo build --features=glwindow,headless
+        cargo build --features=ipc,glwindow,headless
         cargo build --features=glwindow,headless,profile
         rustup target add aarch64-pc-windows-msvc
         cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api

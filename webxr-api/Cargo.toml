@@ -6,13 +6,12 @@ edition = "2018"
 
 homepage = "https://github.com/servo/webxr"
 repository = "https://github.com/servo/webxr"
-keywords = ["webxr", "openvr", "oculus", "magicleap", "headset", "vr", "ar"]
+keywords = ["webxr", "openxr", "oculus", "headset", "vr", "ar"]
 license = "MPL-2.0"
 
 description = '''A safe Rust API that provides a way to interact with
-Virtual Reality and Augmented Reality devices and integration with
-vendor-specific APIs like OpenVR, Oculus, GoogleVR and Magic Leap. The
-API is inspired by the WebXR Device API (https://www.w3.org/TR/webxr/)
+Virtual Reality and Augmented Reality devices and integration with OpenXR.
+The API is inspired by the WebXR Device API (https://www.w3.org/TR/webxr/)
 but adapted to Rust design patterns.'''
 
 [lib]
