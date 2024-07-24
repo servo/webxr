@@ -20,6 +20,7 @@ use webxr_api::Viewer;
 
 use super::IDENTITY_POSE;
 
+use crate::ext_string;
 use crate::openxr::interaction_profiles::INTERACTION_PROFILES;
 
 /// Number of frames to wait with the menu gesture before
@@ -196,9 +197,7 @@ impl OpenXRInput {
 
         INTERACTION_PROFILES.iter().for_each(|profile| {
             if let Some(extension_name) = profile.required_extension {
-                if !supported_interaction_profiles
-                    .contains(&String::from_utf8(extension_name.to_vec()).unwrap())
-                {
+                if !supported_interaction_profiles.contains(&ext_string!(extension_name)) {
                     return;
                 }
             }

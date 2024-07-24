@@ -9,6 +9,7 @@ use openxr::{
     ExtensionSet,
 };
 
+#[macro_export]
 macro_rules! ext_string {
     ($ext_name:expr) => {
         String::from_utf8($ext_name.to_vec()).unwrap()
