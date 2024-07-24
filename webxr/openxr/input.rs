@@ -1,4 +1,5 @@
 use euclid::RigidTransform3D;
+use log::warn;
 use openxr::d3d::D3D11;
 use openxr::{
     self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandTracker,
@@ -18,6 +19,8 @@ use webxr_api::TargetRayMode;
 use webxr_api::Viewer;
 
 use super::IDENTITY_POSE;
+
+use crate::openxr::interaction_profiles::INTERACTION_PROFILES;
 
 /// Number of frames to wait with the menu gesture before
 /// opening the menu.
@@ -173,6 +176,7 @@ impl OpenXRInput {
         instance: &Instance,
         session: &Session<D3D11>,
         needs_hands: bool,
+        supported_interaction_profiles: Vec<String>,
     ) -> (ActionSet, Self, Self) {
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
         let right_hand = OpenXRInput::new(
@@ -190,32 +194,35 @@ impl OpenXRInput {
             needs_hands,
         );
 
-        let mut bindings =
-            right_hand.get_bindings(instance, "trigger/value", Some("squeeze/click"));
-        bindings.extend(
-            left_hand
-                .get_bindings(instance, "trigger/value", Some("squeeze/click"))
-                .into_iter(),
-        );
-        let path_controller = instance
-            .string_to_path("/interaction_profiles/microsoft/motion_controller")
-            .unwrap();
-        instance
-            .suggest_interaction_profile_bindings(path_controller, &bindings)
-            .unwrap();
+        INTERACTION_PROFILES.iter().for_each(|profile| {
+            if let Some(extension_name) = profile.required_extension {
+                if !supported_interaction_profiles
+                    .contains(&String::from_utf8(extension_name.to_vec()).unwrap())
+                {
+                    return;
+                }
+            }
+            let select = profile.standard_buttons[0];
+            let squeeze = Option::from(profile.standard_buttons[1]).filter(|&s| !s.is_empty());
+            let mut bindings = right_hand.get_bindings(instance, select, squeeze);
+            bindings.extend(
+                left_hand
+                    .get_bindings(instance, select, squeeze)
+                    .into_iter(),
+            );
+            let path_controller = instance
+                .string_to_path(profile.path)
+                .expect(format!("Invalid interaction profile path: {}", profile.path).as_str());
+            let _ = instance
+                .suggest_interaction_profile_bindings(path_controller, &bindings)
+                .map_err(|_| {
+                    warn!(
+                        "Interaction profile path not available for this runtime: {:?}",
+                        profile.path
+                    )
+                });
+        });
 
-        let mut bindings = right_hand.get_bindings(instance, "select/click", None);
-        bindings.extend(
-            left_hand
-                .get_bindings(instance, "select/click", None)
-                .into_iter(),
-        );
-        let path_controller = instance
-            .string_to_path("/interaction_profiles/khr/simple_controller")
-            .unwrap();
-        instance
-            .suggest_interaction_profile_bindings(path_controller, &bindings)
-            .unwrap();
         session.attach_action_sets(&[&action_set]).unwrap();
 
         (action_set, right_hand, left_hand)
@@ -230,22 +237,34 @@ impl OpenXRInput {
         let hand = hand_str(self.handedness);
         let path_aim_pose = instance
             .string_to_path(&format!("/user/hand/{}/input/aim/pose", hand))
-            .unwrap();
+            .expect(&format!(
+                "Failed to create path for /user/hand/{}/input/aim/pose",
+                hand
+            ));
         let binding_aim_pose = Binding::new(&self.action_aim_pose, path_aim_pose);
         let path_grip_pose = instance
             .string_to_path(&format!("/user/hand/{}/input/grip/pose", hand))
-            .unwrap();
+            .expect(&format!(
+                "Failed to create path for /user/hand/{}/input/grip/pose",
+                hand
+            ));
         let binding_grip_pose = Binding::new(&self.action_grip_pose, path_grip_pose);
         let path_click = instance
             .string_to_path(&format!("/user/hand/{}/input/{}", hand, select_name))
-            .unwrap();
+            .expect(&format!(
+                "Failed to create path for /user/hand/{}/input/{}",
+                hand, select_name
+            ));
         let binding_click = Binding::new(&self.action_click, path_click);
 
         let mut ret = vec![binding_aim_pose, binding_grip_pose, binding_click];
         if let Some(squeeze_name) = squeeze_name {
             let path_squeeze = instance
                 .string_to_path(&format!("/user/hand/{}/input/{}", hand, squeeze_name))
-                .unwrap();
+                .expect(&format!(
+                    "Failed to create path for /user/hand/{}/input/{}",
+                    hand, squeeze_name
+                ));
             let binding_squeeze = Binding::new(&self.action_squeeze, path_squeeze);
             ret.push(binding_squeeze);
         }

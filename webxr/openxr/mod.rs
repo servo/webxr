@@ -8,6 +8,7 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
+use interaction_profiles::{get_profiles_from_path, get_supported_interaction_profiles};
 use log::{error, warn};
 use openxr::d3d::{Requirements, SessionCreateInfoD3D11, D3D11};
 use openxr::Graphics;
@@ -79,6 +80,7 @@ use wio::com::ComPtr;
 
 mod input;
 use input::OpenXRInput;
+mod interaction_profiles;
 
 const HEIGHT: f32 = 1.4;
 
@@ -188,6 +190,7 @@ pub struct CreatedInstance {
     supports_secondary: bool,
     system: SystemId,
     supports_mutable_fov: bool,
+    supported_interaction_profiles: Vec<String>,
 }
 
 pub fn create_instance(
@@ -221,6 +224,8 @@ pub fn create_instance(
         exts.msft_first_person_observer = true;
     }
 
+    let supported_interaction_profiles = get_supported_interaction_profiles(&supported, &mut exts);
+
     let instance = entry
         .create_instance(&app_info, &exts, &[])
         .map_err(|e| format!("Entry::create_instance {:?}", e))?;
@@ -247,6 +252,7 @@ pub fn create_instance(
         supports_secondary,
         system,
         supports_mutable_fov,
+        supported_interaction_profiles,
     })
 }
 
@@ -870,6 +876,7 @@ impl OpenXrDevice {
             supports_secondary,
             system,
             supports_mutable_fov,
+            supported_interaction_profiles,
         } = instance;
 
         let (init_tx, init_rx) = crossbeam_channel::unbounded();
@@ -1041,8 +1048,12 @@ impl OpenXrDevice {
         });
         drop(data);
 
-        let (action_set, right_hand, left_hand) =
-            OpenXRInput::setup_inputs(&instance, &session, supports_hands);
+        let (action_set, right_hand, left_hand) = OpenXRInput::setup_inputs(
+            &instance,
+            &session,
+            supports_hands,
+            supported_interaction_profiles,
+        );
 
         Ok(OpenXrDevice {
             instance,
@@ -1114,6 +1125,33 @@ impl OpenXrDevice {
                 Some(InstanceLossPending(_)) => {
                     self.events.callback(Event::SessionEnd);
                     return false;
+                }
+                Some(InteractionProfileChanged(_)) => {
+                    let path = self.instance.string_to_path("/user/hand/right").unwrap();
+                    let profile_path = self.session.current_interaction_profile(path).unwrap();
+                    let profile = self.instance.path_to_string(profile_path);
+
+                    match profile {
+                        Ok(profile) => {
+                            let profiles = get_profiles_from_path(profile)
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect();
+
+                            let mut new_left = self.left_hand.input_source();
+                            new_left.profiles.clone_from(&profiles);
+                            self.events
+                                .callback(Event::UpdateInput(new_left.id, new_left));
+
+                            let mut new_right = self.right_hand.input_source();
+                            new_right.profiles.clone_from(&profiles);
+                            self.events
+                                .callback(Event::UpdateInput(new_right.id, new_right));
+                        }
+                        Err(e) => {
+                            error!("Failed to get interaction profile: {:?}", e);
+                        }
+                    }
                 }
                 Some(_) => {
                     // FIXME: Handle other events
