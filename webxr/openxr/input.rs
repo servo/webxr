@@ -368,9 +368,7 @@ impl OpenXRInput {
             id: self.id,
             target_ray_mode: TargetRayMode::TrackedPointer,
             supports_grip: true,
-            // XXXManishearth update with whatever we decide
-            // in https://github.com/immersive-web/webxr-input-profiles/issues/105
-            profiles: vec!["generic-hand".into()],
+            profiles: vec![],
             hand_support,
         }
     }
