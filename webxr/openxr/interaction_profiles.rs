@@ -221,7 +221,12 @@ pub static OCULUS_TOUCH_CONTROLLER_PROFILE: InteractionProfile = InteractionProf
     standard_axes: &["", "", "thumbstick/x", "thumbstick/y"],
     left_buttons: &["x/click", "y/click"],
     right_buttons: &["a/click", "b/click"],
-    profiles: &["oculus-touch-v2", "generic-trigger"],
+    profiles: &[
+        "oculus-touch-v3",
+        "oculus-touch-v2",
+        "oculus-touch",
+        "generic-trigger-squeeze-thumbstick",
+    ],
 };
 
 pub static META_TOUCH_PRO_CONTROLLER_PROFILE: InteractionProfile = InteractionProfile {
