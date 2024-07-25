@@ -12,7 +12,7 @@ use openxr::{
 #[macro_export]
 macro_rules! ext_string {
     ($ext_name:expr) => {
-        String::from_utf8($ext_name.to_vec()).unwrap()
+        std::str::from_utf8($ext_name).unwrap()
     };
 }
 
@@ -357,17 +357,17 @@ pub static INTERACTION_PROFILES: [InteractionProfile; 20] = [
     VALVE_INDEX_CONTROLLER_PROFILE,
 ];
 
-pub fn get_profiles_from_path(path: String) -> Vec<&'static str> {
+pub fn get_profiles_from_path(path: String) -> &'static [&'static str] {
     INTERACTION_PROFILES
         .iter()
         .find(|profile| profile.path == path)
-        .map_or(vec![], |profile| profile.profiles.to_vec())
+        .map_or(&[], |profile| profile.profiles)
 }
 
 pub fn get_supported_interaction_profiles(
     supported_extensions: &ExtensionSet,
     enabled_extensions: &mut ExtensionSet,
-) -> Vec<String> {
+) -> Vec<&'static str> {
     let mut extensions = Vec::new();
     if supported_extensions.bd_controller_interaction {
         extensions.push(ext_string!(BD_CONTROLLER_INTERACTION_EXTENSION_NAME));

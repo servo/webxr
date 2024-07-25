@@ -190,7 +190,7 @@ pub struct CreatedInstance {
     supports_secondary: bool,
     system: SystemId,
     supports_mutable_fov: bool,
-    supported_interaction_profiles: Vec<String>,
+    supported_interaction_profiles: Vec<&'static str>,
 }
 
 pub fn create_instance(

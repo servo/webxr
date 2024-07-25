@@ -1,5 +1,5 @@
 use euclid::RigidTransform3D;
-use log::warn;
+use log::debug;
 use openxr::d3d::D3D11;
 use openxr::{
     self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandTracker,
@@ -177,7 +177,7 @@ impl OpenXRInput {
         instance: &Instance,
         session: &Session<D3D11>,
         needs_hands: bool,
-        supported_interaction_profiles: Vec<String>,
+        supported_interaction_profiles: Vec<&'static str>,
     ) -> (ActionSet, Self, Self) {
         let action_set = instance.create_action_set("hands", "Hands", 0).unwrap();
         let right_hand = OpenXRInput::new(
@@ -195,10 +195,10 @@ impl OpenXRInput {
             needs_hands,
         );
 
-        INTERACTION_PROFILES.iter().for_each(|profile| {
+        for profile in INTERACTION_PROFILES {
             if let Some(extension_name) = profile.required_extension {
                 if !supported_interaction_profiles.contains(&ext_string!(extension_name)) {
-                    return;
+                    continue;
                 }
             }
             let select = profile.standard_buttons[0];
@@ -212,15 +212,15 @@ impl OpenXRInput {
             let path_controller = instance
                 .string_to_path(profile.path)
                 .expect(format!("Invalid interaction profile path: {}", profile.path).as_str());
-            let _ = instance
-                .suggest_interaction_profile_bindings(path_controller, &bindings)
-                .map_err(|_| {
-                    warn!(
-                        "Interaction profile path not available for this runtime: {:?}",
-                        profile.path
-                    )
-                });
-        });
+            if let Err(_) =
+                instance.suggest_interaction_profile_bindings(path_controller, &bindings)
+            {
+                debug!(
+                    "Interaction profile path not available for this runtime: {:?}",
+                    profile.path
+                );
+            }
+        }
 
         session.attach_action_sets(&[&action_set]).unwrap();
 
