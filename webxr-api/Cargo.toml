@@ -19,7 +19,6 @@ path = "lib.rs"
 
 [features]
 ipc = ["serde", "ipc-channel", "euclid/serde"]
-profile = ["time"]
 
 [dependencies]
 euclid = "0.22"

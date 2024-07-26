@@ -176,7 +176,6 @@ impl DeviceAPI for GlWindowDevice {
 
     fn begin_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) -> Option<Frame> {
         log::debug!("Begin animation frame for layers {:?}", layers);
-        let time_ns = time::precise_time_ns();
         let translation = Vector3D::from_untyped(self.window.get_translation());
         let translation: RigidTransform3D<_, _, Native> =
             RigidTransform3D::from_translation(translation);
@@ -191,9 +190,7 @@ impl DeviceAPI for GlWindowDevice {
             }),
             inputs: vec![],
             events: vec![],
-            time_ns,
             sub_images,
-            sent_time: 0,
             hit_test_results: vec![],
         })
     }

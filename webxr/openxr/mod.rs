@@ -1237,7 +1237,6 @@ impl DeviceAPI for OpenXrDevice {
 
         let mut guard = self.shared_data.lock().unwrap();
         let data = guard.as_mut().unwrap();
-        let time_ns = time::precise_time_ns();
 
         // XXXManishearth should we check frame_state.should_render?
         let (_view_flags, mut views) = match self.session.locate_views(
@@ -1327,9 +1326,7 @@ impl DeviceAPI for OpenXrDevice {
             pose: Some(ViewerPose { transform, views }),
             inputs: vec![right.frame, left.frame],
             events: vec![],
-            time_ns,
             sub_images,
-            sent_time: 0,
             hit_test_results: vec![],
         };
 
