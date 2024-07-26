@@ -31,7 +31,7 @@ pub enum InteractionProfileType {
     MicrosoftMixedRealityMotionController,
     OculusGoController,
     OculusTouchController,
-    MetaTouchProController,
+    FacebookTouchControllerPro,
     MetaTouchPlusController,
     MetaTouchControllerRiftCv1,
     MetaTouchControllerQuest1RiftS,
@@ -229,9 +229,9 @@ pub static OCULUS_TOUCH_CONTROLLER_PROFILE: InteractionProfile = InteractionProf
     ],
 };
 
-pub static META_TOUCH_PRO_CONTROLLER_PROFILE: InteractionProfile = InteractionProfile {
-    profile_type: InteractionProfileType::MetaTouchProController,
-    path: "/interaction_profiles/meta/touch_pro_controller",
+pub static FACEBOOK_TOUCH_CONTROLLER_PRO_PROFILE: InteractionProfile = InteractionProfile {
+    profile_type: InteractionProfileType::FacebookTouchControllerPro,
+    path: "/interaction_profiles/facebook/touch_controller_pro",
     required_extension: Some(FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME),
     standard_buttons: &["trigger/value", "squeeze/value", "", "thumbstick/click"],
     standard_axes: &["", "", "thumbstick/x", "thumbstick/y"],
@@ -245,9 +245,9 @@ pub static META_TOUCH_PRO_CONTROLLER_PROFILE: InteractionProfile = InteractionPr
     ],
 };
 
-pub static META_TOUCH_PLUS_CONTROLLER_PROFILE: InteractionProfile = InteractionProfile {
+pub static META_TOUCH_CONTROLLER_PLUS_PROFILE: InteractionProfile = InteractionProfile {
     profile_type: InteractionProfileType::MetaTouchPlusController,
-    path: "/interaction_profiles/meta/touch_plus_controller",
+    path: "/interaction_profiles/meta/touch_controller_plus",
     required_extension: Some(META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME),
     standard_buttons: &["trigger/value", "squeeze/value", "", "thumbstick/click"],
     standard_axes: &["", "", "thumbstick/x", "thumbstick/y"],
@@ -348,8 +348,8 @@ pub static INTERACTION_PROFILES: [InteractionProfile; 20] = [
     MICROSOFT_MIXED_REALITY_MOTION_CONTROLLER_PROFILE,
     OCULUS_GO_CONTROLLER_PROFILE,
     OCULUS_TOUCH_CONTROLLER_PROFILE,
-    META_TOUCH_PRO_CONTROLLER_PROFILE,
-    META_TOUCH_PLUS_CONTROLLER_PROFILE,
+    FACEBOOK_TOUCH_CONTROLLER_PRO_PROFILE,
+    META_TOUCH_CONTROLLER_PLUS_PROFILE,
     META_TOUCH_CONTROLLER_RIFT_CV1_PROFILE,
     META_TOUCH_CONTROLLER_QUEST_1_RIFT_S_PROFILE,
     META_TOUCH_CONTROLLER_QUEST_2_PROFILE,
