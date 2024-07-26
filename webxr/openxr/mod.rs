@@ -11,13 +11,12 @@ use euclid::Vector3D;
 use interaction_profiles::{get_profiles_from_path, get_supported_interaction_profiles};
 use log::{error, warn};
 use openxr::d3d::{Requirements, SessionCreateInfoD3D11, D3D11};
-use openxr::Graphics;
 use openxr::{
     self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
-    Fovf, FrameState, FrameStream, FrameWaiter, Instance, Posef, Quaternionf, ReferenceSpaceType,
-    SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags, SwapchainCreateInfo,
-    SwapchainUsageFlags, SystemId, Vector3f, ViewConfigurationType,
+    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef, Quaternionf,
+    ReferenceSpaceType, SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags,
+    SwapchainCreateInfo, SwapchainUsageFlags, SystemId, Vector3f, Version, ViewConfigurationType,
 };
 use sparkle::gl;
 use sparkle::gl::GLuint;
@@ -211,6 +210,7 @@ pub fn create_instance(
         application_version: 1,
         engine_name: "servo",
         engine_version: 1,
+        api_version: Version::new(1, 0, 36),
     };
 
     let mut exts = ExtensionSet::default();

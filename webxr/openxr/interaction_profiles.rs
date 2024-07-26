@@ -4,7 +4,7 @@ use openxr::{
         EXT_SAMSUNG_ODYSSEY_CONTROLLER_EXTENSION_NAME, FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
         HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME,
         HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME,
-        ML_ML2_CONTROLLER_INTERACTION_EXTENSION_NAME,
+        META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME, ML_ML2_CONTROLLER_INTERACTION_EXTENSION_NAME,
     },
     ExtensionSet,
 };
@@ -232,7 +232,7 @@ pub static OCULUS_TOUCH_CONTROLLER_PROFILE: InteractionProfile = InteractionProf
 pub static META_TOUCH_PRO_CONTROLLER_PROFILE: InteractionProfile = InteractionProfile {
     profile_type: InteractionProfileType::MetaTouchProController,
     path: "/interaction_profiles/meta/touch_pro_controller",
-    required_extension: None,
+    required_extension: Some(FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME),
     standard_buttons: &["trigger/value", "squeeze/value", "", "thumbstick/click"],
     standard_axes: &["", "", "thumbstick/x", "thumbstick/y"],
     left_buttons: &["x/click", "y/click"],
@@ -248,7 +248,7 @@ pub static META_TOUCH_PRO_CONTROLLER_PROFILE: InteractionProfile = InteractionPr
 pub static META_TOUCH_PLUS_CONTROLLER_PROFILE: InteractionProfile = InteractionProfile {
     profile_type: InteractionProfileType::MetaTouchPlusController,
     path: "/interaction_profiles/meta/touch_plus_controller",
-    required_extension: None,
+    required_extension: Some(META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME),
     standard_buttons: &["trigger/value", "squeeze/value", "", "thumbstick/click"],
     standard_axes: &["", "", "thumbstick/x", "thumbstick/y"],
     left_buttons: &["x/click", "y/click"],
@@ -400,6 +400,10 @@ pub fn get_supported_interaction_profiles(
     if supported_extensions.fb_touch_controller_pro {
         extensions.push(ext_string!(FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME));
         enabled_extensions.fb_touch_controller_pro = true;
+    }
+    if supported_extensions.meta_touch_controller_plus {
+        extensions.push(ext_string!(META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME));
+        enabled_extensions.meta_touch_controller_plus = true;
     }
     extensions
 }
