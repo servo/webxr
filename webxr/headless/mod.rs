@@ -323,7 +323,6 @@ macro_rules! with_all_sessions {
 
 impl HeadlessDeviceData {
     fn get_frame(&self, s: &PerSessionData, sub_images: Vec<SubImages>) -> Frame {
-        let time_ns = time::precise_time_ns();
         let views = self.views.clone();
 
         let pose = self.viewer_origin.map(|transform| {
@@ -358,9 +357,7 @@ impl HeadlessDeviceData {
             pose,
             inputs,
             events: vec![],
-            time_ns,
             sub_images,
-            sent_time: 0,
             hit_test_results: vec![],
         }
     }

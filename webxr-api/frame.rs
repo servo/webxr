@@ -31,12 +31,6 @@ pub struct Frame {
     /// The subimages to render to
     pub sub_images: Vec<SubImages>,
 
-    /// Value of time::precise_time_ns() when frame was obtained
-    pub time_ns: u64,
-
-    /// The time the frame was sent (only set with the profile feature)
-    pub sent_time: u64,
-
     /// The hit test results for this frame, if any
     pub hit_test_results: Vec<HitTestResult>,
 }

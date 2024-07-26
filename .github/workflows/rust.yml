@@ -28,7 +28,7 @@ jobs:
         cd webxr
         cargo build --features=glwindow,headless
         cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless,profile
+        cargo build --features=glwindow,headless
   mac:
     runs-on: macos-latest
     steps:
@@ -39,7 +39,7 @@ jobs:
         cd webxr
         cargo build --features=glwindow,headless
         cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless,profile
+        cargo build --features=glwindow,headless
   win:
     runs-on: windows-latest
     steps:
@@ -50,7 +50,7 @@ jobs:
         cd webxr
         cargo build --features=glwindow,headless
         cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless,profile
+        cargo build --features=glwindow,headless
         rustup target add aarch64-pc-windows-msvc
         cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
   build_result:
