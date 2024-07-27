@@ -412,6 +412,7 @@ struct SharedData {
     secondary_blend_mode: Option<EnvironmentBlendMode>,
     frame_state: Option<FrameState>,
     space: Space,
+    swapchain_sample_count: u32,
 }
 
 struct OpenXrLayerManager {
@@ -549,13 +550,14 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         })?;
         let format = pick_format(&formats);
         let texture_size = init.texture_size(&data.viewports());
+        let sample_count = data.swapchain_sample_count;
         let swapchain_create_info = SwapchainCreateInfo {
             create_flags: SwapchainCreateFlags::EMPTY,
             usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::SAMPLED,
             width: texture_size.width as u32,
             height: texture_size.height as u32,
             format,
-            sample_count: 1,
+            sample_count,
             face_count: 1,
             array_size: 1,
             mip_count: 1,
@@ -971,6 +973,8 @@ impl OpenXrDevice {
             right_view_configuration.recommended_image_rect_height,
         );
 
+        let swapchain_sample_count = left_view_configuration.recommended_swapchain_sample_count;
+
         let secondary_active = false;
         let (secondary, secondary_blend_mode) = if supports_secondary {
             let view_configuration = *instance
@@ -1045,6 +1049,7 @@ impl OpenXrDevice {
             secondary_active,
             primary_blend_mode,
             secondary_blend_mode,
+            swapchain_sample_count,
         });
         drop(data);
 
