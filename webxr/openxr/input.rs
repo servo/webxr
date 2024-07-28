@@ -18,6 +18,7 @@ use webxr_api::SelectEvent;
 use webxr_api::TargetRayMode;
 use webxr_api::Viewer;
 
+use super::interaction_profiles::InteractionProfile;
 use super::IDENTITY_POSE;
 
 use crate::ext_string;
@@ -92,6 +93,10 @@ pub struct OpenXRInput {
     menu_gesture_sustain: u8,
     #[allow(unused)]
     hand_tracker: Option<HandTracker>,
+    action_buttons_common: [Action<f32>; 4],
+    action_buttons_left: Vec<Action<f32>>,
+    action_buttons_right: Vec<Action<f32>>,
+    action_axes_common: [Action<f32>; 4],
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -157,6 +162,86 @@ impl OpenXRInput {
             None
         };
 
+        let action_buttons_common: [Action<f32>; 4] = {
+            let button1: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_trigger", hand),
+                    &format!("{}_trigger", hand),
+                    &[],
+                )
+                .unwrap();
+            let button2: Action<f32> = action_set
+                .create_action(&format!("{}_grip", hand), &format!("{}_grip", hand), &[])
+                .unwrap();
+            let button3: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_touchpad_click", hand),
+                    &format!("{}_touchpad_click", hand),
+                    &[],
+                )
+                .unwrap();
+            let button4: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_thumbstick_click", hand),
+                    &format!("{}_thumbstick_click", hand),
+                    &[],
+                )
+                .unwrap();
+            [button1, button2, button3, button4]
+        };
+
+        let action_buttons_left = {
+            let button1: Action<f32> = action_set
+                .create_action(&format!("{}_x", hand), &format!("{}_x", hand), &[])
+                .unwrap();
+            let button2: Action<f32> = action_set
+                .create_action(&format!("{}_y", hand), &format!("{}_y", hand), &[])
+                .unwrap();
+            vec![button1, button2]
+        };
+
+        let action_buttons_right = {
+            let button1: Action<f32> = action_set
+                .create_action(&format!("{}_a", hand), &format!("{}_a", hand), &[])
+                .unwrap();
+            let button2: Action<f32> = action_set
+                .create_action(&format!("{}_b", hand), &format!("{}_b", hand), &[])
+                .unwrap();
+            vec![button1, button2]
+        };
+
+        let action_axes_common: [Action<f32>; 4] = {
+            let axis1: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_touchpad_x", hand),
+                    &format!("{}_touchpad_x", hand),
+                    &[],
+                )
+                .unwrap();
+            let axis2: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_touchpad_y", hand),
+                    &format!("{}_touchpad_y", hand),
+                    &[],
+                )
+                .unwrap();
+            let axis3: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_thumbstick_x", hand),
+                    &format!("{}_thumbstick_x", hand),
+                    &[],
+                )
+                .unwrap();
+            let axis4: Action<f32> = action_set
+                .create_action(
+                    &format!("{}_thumbstick_y", hand),
+                    &format!("{}_thumbstick_y", hand),
+                    &[],
+                )
+                .unwrap();
+            [axis1, axis2, axis3, axis4]
+        };
+
         Self {
             id,
             action_aim_pose,
@@ -170,6 +255,10 @@ impl OpenXRInput {
             squeeze_state: ClickState::Done,
             menu_gesture_sustain: 0,
             hand_tracker,
+            action_buttons_common,
+            action_axes_common,
+            action_buttons_left,
+            action_buttons_right,
         }
     }
 
@@ -203,10 +292,10 @@ impl OpenXRInput {
             }
             let select = profile.standard_buttons[0];
             let squeeze = Option::from(profile.standard_buttons[1]).filter(|&s| !s.is_empty());
-            let mut bindings = right_hand.get_bindings(instance, select, squeeze);
+            let mut bindings = right_hand.get_bindings(instance, select, squeeze, &profile);
             bindings.extend(
                 left_hand
-                    .get_bindings(instance, select, squeeze)
+                    .get_bindings(instance, select, squeeze, &profile)
                     .into_iter(),
             );
             let path_controller = instance
@@ -232,6 +321,7 @@ impl OpenXRInput {
         instance: &Instance,
         select_name: &str,
         squeeze_name: Option<&str>,
+        interaction_profile: &InteractionProfile,
     ) -> Vec<Binding> {
         let hand = hand_str(self.handedness);
         let path_aim_pose = instance
@@ -267,6 +357,75 @@ impl OpenXRInput {
             let binding_squeeze = Binding::new(&self.action_squeeze, path_squeeze);
             ret.push(binding_squeeze);
         }
+        self.action_buttons_common
+            .iter()
+            .enumerate()
+            .for_each(|(i, action)| {
+                let button_path = interaction_profile.standard_buttons[i];
+                if button_path != "" {
+                    let path = instance
+                        .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
+                        .expect(&format!(
+                            "Failed to create path for /user/hand/{}/input/{}",
+                            hand, button_path
+                        ));
+                    let binding = Binding::new(action, path);
+                    ret.push(binding);
+                }
+            });
+
+        if !interaction_profile.left_buttons.is_empty() && hand == "left" {
+            self.action_buttons_left
+                .iter()
+                .enumerate()
+                .for_each(|(i, action)| {
+                    let button_path = interaction_profile.left_buttons[i];
+                    if button_path != "" {
+                        let path = instance
+                            .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
+                            .expect(&format!(
+                                "Failed to create path for /user/hand/{}/input/{}",
+                                hand, button_path
+                            ));
+                        let binding = Binding::new(action, path);
+                        ret.push(binding);
+                    }
+                })
+        } else if !interaction_profile.right_buttons.is_empty() && hand == "right" {
+            self.action_buttons_right
+                .iter()
+                .enumerate()
+                .for_each(|(i, action)| {
+                    let button_path = interaction_profile.right_buttons[i];
+                    if button_path != "" {
+                        let path = instance
+                            .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
+                            .expect(&format!(
+                                "Failed to create path for /user/hand/{}/input/{}",
+                                hand, button_path
+                            ));
+                        let binding = Binding::new(action, path);
+                        ret.push(binding);
+                    }
+                })
+        }
+
+        self.action_axes_common
+            .iter()
+            .enumerate()
+            .for_each(|(i, action)| {
+                let axis_path = interaction_profile.standard_axes[i];
+                if axis_path != "" {
+                    let path = instance
+                        .string_to_path(&format!("/user/hand/{}/input/{}", hand, axis_path))
+                        .expect(&format!(
+                            "Failed to create path for /user/hand/{}/input/{}",
+                            hand, axis_path
+                        ));
+                    let binding = Binding::new(action, path);
+                    ret.push(binding);
+                }
+            });
         ret
     }
 
@@ -324,8 +483,63 @@ impl OpenXRInput {
             self.menu_gesture_sustain = 0;
         }
 
+        let hand = hand_str(self.handedness);
         let click = self.action_click.state(session, Path::NULL).unwrap();
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
+        let (button_values, buttons_changed) = {
+            let mut changed = false;
+            let mut values = self
+                .action_buttons_common
+                .iter()
+                .map(|action| {
+                    let state = action.state(session, Path::NULL).unwrap();
+                    changed = changed || state.changed_since_last_sync;
+                    state.current_state
+                })
+                .collect::<Vec<f32>>();
+            if hand == "left" {
+                let additional_buttons = self
+                    .action_buttons_left
+                    .iter()
+                    .map(|action| {
+                        let state = action.state(session, Path::NULL).unwrap();
+                        changed = changed || state.changed_since_last_sync;
+                        state.current_state
+                    })
+                    .collect::<Vec<f32>>();
+                values.extend_from_slice(&additional_buttons);
+            } else if hand == "right" {
+                let additional_buttons = self
+                    .action_buttons_right
+                    .iter()
+                    .map(|action| {
+                        let state = action.state(session, Path::NULL).unwrap();
+                        changed = changed || state.changed_since_last_sync;
+                        state.current_state
+                    })
+                    .collect::<Vec<f32>>();
+                values.extend_from_slice(&additional_buttons);
+            }
+            (values, changed)
+        };
+
+        let (axis_values, axes_changed) = {
+            let mut changed = false;
+            let values = self
+                .action_axes_common
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    let state = action.state(session, Path::NULL).unwrap();
+                    changed = changed || state.changed_since_last_sync;
+                    // Invert input from y axes
+                    state.current_state * if i % 2 == 1 { -1.0 } else { 1.0 }
+                })
+                .collect::<Vec<f32>>();
+            (values, changed)
+        };
+
+        let input_changed = buttons_changed || axes_changed;
 
         let (click_is_active, click_event) =
             self.click_state
@@ -345,6 +559,9 @@ impl OpenXRInput {
             squeezed: squeeze_is_active && squeeze.current_state,
             grip_origin,
             hand,
+            button_values,
+            axis_values,
+            input_changed,
         };
 
         Frame {

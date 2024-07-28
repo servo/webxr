@@ -49,6 +49,9 @@ pub struct InputFrame {
     pub pressed: bool,
     pub hand: Option<Box<Hand<JointFrame>>>,
     pub squeezed: bool,
+    pub button_values: Vec<f32>,
+    pub axis_values: Vec<f32>,
+    pub input_changed: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

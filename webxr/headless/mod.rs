@@ -351,6 +351,9 @@ impl HeadlessDeviceData {
                 pressed: false,
                 squeezed: false,
                 hand: None,
+                button_values: vec![],
+                axis_values: vec![],
+                input_changed: false,
             })
             .collect();
         Frame {

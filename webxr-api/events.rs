@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::Frame;
+use crate::InputFrame;
 use crate::InputId;
 use crate::InputSource;
 use crate::SelectEvent;
@@ -24,6 +25,7 @@ pub enum Event {
     VisibilityChange(Visibility),
     /// Selection started / ended
     Select(InputId, SelectKind, SelectEvent, Frame),
+    InputChanged(InputId, InputFrame),
 }
 
 #[derive(Copy, Clone, Debug)]
