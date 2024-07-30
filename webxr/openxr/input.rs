@@ -93,10 +93,10 @@ pub struct OpenXRInput {
     menu_gesture_sustain: u8,
     #[allow(unused)]
     hand_tracker: Option<HandTracker>,
-    action_buttons_common: [Action<f32>; 4],
+    action_buttons_common: Vec<Action<f32>>,
     action_buttons_left: Vec<Action<f32>>,
     action_buttons_right: Vec<Action<f32>>,
-    action_axes_common: [Action<f32>; 4],
+    action_axes_common: Vec<Action<f32>>,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -162,7 +162,7 @@ impl OpenXRInput {
             None
         };
 
-        let action_buttons_common: [Action<f32>; 4] = {
+        let action_buttons_common: Vec<Action<f32>> = {
             let button1: Action<f32> = action_set
                 .create_action(
                     &format!("{}_trigger", hand),
@@ -187,7 +187,7 @@ impl OpenXRInput {
                     &[],
                 )
                 .unwrap();
-            [button1, button2, button3, button4]
+            vec![button1, button2, button3, button4]
         };
 
         let action_buttons_left = {
@@ -210,7 +210,7 @@ impl OpenXRInput {
             vec![button1, button2]
         };
 
-        let action_axes_common: [Action<f32>; 4] = {
+        let action_axes_common: Vec<Action<f32>> = {
             let axis1: Action<f32> = action_set
                 .create_action(
                     &format!("{}_touchpad_x", hand),
@@ -239,7 +239,7 @@ impl OpenXRInput {
                     &[],
                 )
                 .unwrap();
-            [axis1, axis2, axis3, axis4]
+            vec![axis1, axis2, axis3, axis4]
         };
 
         Self {
@@ -488,37 +488,23 @@ impl OpenXRInput {
         let squeeze = self.action_squeeze.state(session, Path::NULL).unwrap();
         let (button_values, buttons_changed) = {
             let mut changed = false;
-            let mut values = self
-                .action_buttons_common
-                .iter()
-                .map(|action| {
-                    let state = action.state(session, Path::NULL).unwrap();
-                    changed = changed || state.changed_since_last_sync;
-                    state.current_state
-                })
-                .collect::<Vec<f32>>();
+            let mut values = Vec::<f32>::new();
+            let mut sync_buttons = |actions: &Vec<Action<f32>>| {
+                let buttons = actions
+                    .iter()
+                    .map(|action| {
+                        let state = action.state(session, Path::NULL).unwrap();
+                        changed = changed || state.changed_since_last_sync;
+                        state.current_state
+                    })
+                    .collect::<Vec<f32>>();
+                values.extend_from_slice(&buttons);
+            };
+            sync_buttons(&self.action_buttons_common);
             if hand == "left" {
-                let additional_buttons = self
-                    .action_buttons_left
-                    .iter()
-                    .map(|action| {
-                        let state = action.state(session, Path::NULL).unwrap();
-                        changed = changed || state.changed_since_last_sync;
-                        state.current_state
-                    })
-                    .collect::<Vec<f32>>();
-                values.extend_from_slice(&additional_buttons);
+                sync_buttons(&self.action_buttons_left);
             } else if hand == "right" {
-                let additional_buttons = self
-                    .action_buttons_right
-                    .iter()
-                    .map(|action| {
-                        let state = action.state(session, Path::NULL).unwrap();
-                        changed = changed || state.changed_since_last_sync;
-                        state.current_state
-                    })
-                    .collect::<Vec<f32>>();
-                values.extend_from_slice(&additional_buttons);
+                sync_buttons(&self.action_buttons_right);
             }
             (values, changed)
         };
