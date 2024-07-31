@@ -28,6 +28,25 @@ use crate::openxr::interaction_profiles::INTERACTION_PROFILES;
 /// opening the menu.
 const MENU_GESTURE_SUSTAIN_THRESHOLD: u8 = 60;
 
+/// Helper macro for binding action paths in an interaction profile entry
+macro_rules! bind_inputs {
+    ($actions:expr, $paths:expr, $hand:expr, $instance:expr, $ret:expr) => {
+        $actions.iter().enumerate().for_each(|(i, action)| {
+            let action_path = $paths[i];
+            if action_path != "" {
+                let path = $instance
+                    .string_to_path(&format!("/user/hand/{}/input/{}", $hand, action_path))
+                    .expect(&format!(
+                        "Failed to create path for /user/hand/{}/input/{}",
+                        $hand, action_path
+                    ));
+                let binding = Binding::new(action, path);
+                $ret.push(binding);
+            }
+        });
+    };
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ClickState {
     Clicking,
@@ -357,75 +376,41 @@ impl OpenXRInput {
             let binding_squeeze = Binding::new(&self.action_squeeze, path_squeeze);
             ret.push(binding_squeeze);
         }
-        self.action_buttons_common
-            .iter()
-            .enumerate()
-            .for_each(|(i, action)| {
-                let button_path = interaction_profile.standard_buttons[i];
-                if button_path != "" {
-                    let path = instance
-                        .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
-                        .expect(&format!(
-                            "Failed to create path for /user/hand/{}/input/{}",
-                            hand, button_path
-                        ));
-                    let binding = Binding::new(action, path);
-                    ret.push(binding);
-                }
-            });
+
+        bind_inputs!(
+            self.action_buttons_common,
+            interaction_profile.standard_buttons,
+            hand,
+            instance,
+            ret
+        );
 
         if !interaction_profile.left_buttons.is_empty() && hand == "left" {
-            self.action_buttons_left
-                .iter()
-                .enumerate()
-                .for_each(|(i, action)| {
-                    let button_path = interaction_profile.left_buttons[i];
-                    if button_path != "" {
-                        let path = instance
-                            .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
-                            .expect(&format!(
-                                "Failed to create path for /user/hand/{}/input/{}",
-                                hand, button_path
-                            ));
-                        let binding = Binding::new(action, path);
-                        ret.push(binding);
-                    }
-                })
+            bind_inputs!(
+                self.action_buttons_left,
+                interaction_profile.left_buttons,
+                hand,
+                instance,
+                ret
+            );
         } else if !interaction_profile.right_buttons.is_empty() && hand == "right" {
-            self.action_buttons_right
-                .iter()
-                .enumerate()
-                .for_each(|(i, action)| {
-                    let button_path = interaction_profile.right_buttons[i];
-                    if button_path != "" {
-                        let path = instance
-                            .string_to_path(&format!("/user/hand/{}/input/{}", hand, button_path))
-                            .expect(&format!(
-                                "Failed to create path for /user/hand/{}/input/{}",
-                                hand, button_path
-                            ));
-                        let binding = Binding::new(action, path);
-                        ret.push(binding);
-                    }
-                })
+            bind_inputs!(
+                self.action_buttons_right,
+                interaction_profile.right_buttons,
+                hand,
+                instance,
+                ret
+            );
         }
 
-        self.action_axes_common
-            .iter()
-            .enumerate()
-            .for_each(|(i, action)| {
-                let axis_path = interaction_profile.standard_axes[i];
-                if axis_path != "" {
-                    let path = instance
-                        .string_to_path(&format!("/user/hand/{}/input/{}", hand, axis_path))
-                        .expect(&format!(
-                            "Failed to create path for /user/hand/{}/input/{}",
-                            hand, axis_path
-                        ));
-                    let binding = Binding::new(action, path);
-                    ret.push(binding);
-                }
-            });
+        bind_inputs!(
+            self.action_axes_common,
+            interaction_profile.standard_axes,
+            hand,
+            instance,
+            ret
+        );
+
         ret
     }
 
