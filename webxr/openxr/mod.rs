@@ -11,10 +11,12 @@ use euclid::Vector3D;
 use interaction_profiles::{get_profiles_from_path, get_supported_interaction_profiles};
 use log::{error, warn};
 use openxr::d3d::{Requirements, SessionCreateInfoD3D11, D3D11};
+use openxr::sys::CompositionLayerPassthroughFB;
 use openxr::{
-    self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerFlags,
+    self, ActionSet, ActiveActionSet, ApplicationInfo, CompositionLayerBase, CompositionLayerFlags,
     CompositionLayerProjection, Entry, EnvironmentBlendMode, ExtensionSet, Extent2Di, FormFactor,
-    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Posef, Quaternionf,
+    Fovf, FrameState, FrameStream, FrameWaiter, Graphics, Instance, Passthrough,
+    PassthroughFlagsFB, PassthroughLayer, PassthroughLayerPurposeFB, Posef, Quaternionf,
     ReferenceSpaceType, SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags,
     SwapchainCreateInfo, SwapchainUsageFlags, SystemId, Vector3f, Version, ViewConfigurationType,
 };
@@ -190,11 +192,13 @@ pub struct CreatedInstance {
     system: SystemId,
     supports_mutable_fov: bool,
     supported_interaction_profiles: Vec<&'static str>,
+    supports_passthrough: bool,
 }
 
 pub fn create_instance(
     needs_hands: bool,
     needs_secondary: bool,
+    needs_passthrough: bool,
 ) -> Result<CreatedInstance, String> {
     let entry = unsafe { Entry::load().map_err(|e| format!("Entry::load {:?}", e))? };
     let supported = entry
@@ -202,6 +206,7 @@ pub fn create_instance(
         .map_err(|e| format!("Entry::enumerate_extensions {:?}", e))?;
     warn!("Available extensions:\n{:?}", supported);
     let mut supports_hands = needs_hands && supported.ext_hand_tracking;
+    let supports_passthrough = needs_passthrough && supported.fb_passthrough;
     let supports_secondary = needs_secondary
         && supported.msft_secondary_view_configuration
         && supported.msft_first_person_observer;
@@ -222,6 +227,10 @@ pub fn create_instance(
     if supports_secondary {
         exts.msft_secondary_view_configuration = true;
         exts.msft_first_person_observer = true;
+    }
+
+    if supports_passthrough {
+        exts.fb_passthrough = true;
     }
 
     let supported_interaction_profiles = get_supported_interaction_profiles(&supported, &mut exts);
@@ -253,6 +262,7 @@ pub fn create_instance(
         system,
         supports_mutable_fov,
         supported_interaction_profiles,
+        supports_passthrough,
     })
 }
 
@@ -291,7 +301,7 @@ fn get_matching_adapter(
 }
 
 pub fn create_surfman_adapter() -> Option<SurfmanAdapter> {
-    let instance = create_instance(false, false).ok()?;
+    let instance = create_instance(false, false, false).ok()?;
     let system = instance
         .instance
         .system(FormFactor::HEAD_MOUNTED_DISPLAY)
@@ -331,7 +341,8 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
             let needs_hands = init.feature_requested("hand-tracking");
             let needs_secondary =
                 init.feature_requested("secondary-views") && init.first_person_observer_view;
-            let instance = create_instance(needs_hands, needs_secondary)
+            let needs_passthrough = mode == SessionMode::ImmersiveAR;
+            let instance = create_instance(needs_hands, needs_secondary, needs_passthrough)
                 .map_err(|e| Error::BackendSpecific(e))?;
 
             let mut supported_features = vec!["local-floor".into()];
@@ -362,14 +373,16 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
         // but this requires an already created XrInstance and SystemId.
         // We'll make a "default" instance here to check the blend modes,
         // then a proper one in request_session with hands/secondary support if needed.
-        if let Ok(instance) = create_instance(false, false) {
+        let needs_passthrough = mode == SessionMode::ImmersiveAR;
+        if let Ok(instance) = create_instance(false, false, needs_passthrough) {
             if let Ok(blend_modes) = instance.instance.enumerate_environment_blend_modes(
                 instance.system,
                 ViewConfigurationType::PRIMARY_STEREO,
             ) {
                 if mode == SessionMode::ImmersiveAR {
                     supports = blend_modes.contains(&EnvironmentBlendMode::ADDITIVE)
-                        || blend_modes.contains(&EnvironmentBlendMode::ALPHA_BLEND);
+                        || blend_modes.contains(&EnvironmentBlendMode::ALPHA_BLEND)
+                        || instance.supports_passthrough;
                 } else if mode == SessionMode::ImmersiveVR {
                     // Immersive VR sessions are not precluded by non-opaque blending
                     supports = blend_modes.len() > 0;
@@ -422,6 +435,8 @@ struct OpenXrLayerManager {
     layers: Vec<(ContextId, LayerId)>,
     openxr_layers: HashMap<LayerId, OpenXrLayer>,
     clearer: GlClearer,
+    _passthrough: Option<Passthrough>,
+    passthrough_layer: Option<PassthroughLayer>,
 }
 
 struct OpenXrLayer {
@@ -439,6 +454,8 @@ impl OpenXrLayerManager {
         shared_data: Arc<Mutex<Option<SharedData>>>,
         frame_stream: FrameStream<D3D11>,
         should_reverse_winding: bool,
+        _passthrough: Option<Passthrough>,
+        passthrough_layer: Option<PassthroughLayer>,
     ) -> OpenXrLayerManager {
         let layers = Vec::new();
         let openxr_layers = HashMap::new();
@@ -450,6 +467,8 @@ impl OpenXrLayerManager {
             layers,
             openxr_layers,
             clearer,
+            _passthrough,
+            passthrough_layer,
         }
     }
 
@@ -702,10 +721,24 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
             })
             .collect::<Vec<_>>();
 
-        let primary_layers = primary_layers
+        let mut primary_layers = primary_layers
             .iter()
             .map(|layer| layer.deref())
             .collect::<Vec<_>>();
+
+        if let Some(passthrough_layer) = &self.passthrough_layer {
+            let clp = CompositionLayerPassthroughFB {
+                ty: CompositionLayerPassthroughFB::TYPE,
+                next: std::ptr::null(),
+                flags: CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA,
+                space: openxr::sys::Space::from_raw(0),
+                layer_handle: *passthrough_layer.inner(),
+            };
+            let passthrough_base = &clp as *const _ as *const CompositionLayerBase<D3D11>;
+            unsafe {
+                primary_layers.insert(0, &*passthrough_base);
+            }
+        }
 
         if let (Some(secondary), true) = (data.secondary.as_ref(), data.secondary_active) {
             let mut s_fov = secondary.view.fov;
@@ -879,6 +912,7 @@ impl OpenXrDevice {
             system,
             supports_mutable_fov,
             supported_interaction_profiles,
+            supports_passthrough,
         } = instance;
 
         let (init_tx, init_rx) = crossbeam_channel::unbounded();
@@ -891,6 +925,19 @@ impl OpenXrDevice {
         let layer_manager = grand_manager.create_layer_manager(move |device, _| {
             let (session, frame_waiter, frame_stream) =
                 OpenXrLayerManager::create_session(device, &instance_clone, system)?;
+            let (passthrough, passthrough_layer) = if supports_passthrough {
+                let flags = PassthroughFlagsFB::IS_RUNNING_AT_CREATION;
+                let purpose = PassthroughLayerPurposeFB::RECONSTRUCTION;
+                let passthrough = session
+                    .create_passthrough(flags)
+                    .expect("Unable to initialize passthrough");
+                let passthrough_layer = session
+                    .create_passthrough_layer(&passthrough, flags, purpose)
+                    .expect("Failed to create passthrough layer");
+                (Some(passthrough), Some(passthrough_layer))
+            } else {
+                (None, None)
+            };
             let session = Arc::new(session);
             init_tx
                 .send((session.clone(), frame_waiter))
@@ -900,6 +947,8 @@ impl OpenXrDevice {
                 shared_data_clone,
                 frame_stream,
                 !supports_mutable_fov,
+                passthrough,
+                passthrough_layer,
             ))
         })?;
 
