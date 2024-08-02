@@ -1414,6 +1414,9 @@ impl DeviceAPI for OpenXrDevice {
             }
         }
 
+        let left_input_changed = left.frame.input_changed;
+        let right_input_changed = right.frame.input_changed;
+
         let frame = Frame {
             pose: Some(ViewerPose { transform, views }),
             inputs: vec![right.frame, left.frame],
@@ -1453,6 +1456,14 @@ impl DeviceAPI for OpenXrDevice {
                 left_squeeze,
                 frame.clone(),
             ));
+        }
+        if left_input_changed {
+            self.events
+                .callback(Event::InputChanged(InputId(1), frame.inputs[1].clone()))
+        }
+        if right_input_changed {
+            self.events
+                .callback(Event::InputChanged(InputId(0), frame.inputs[0].clone()))
         }
         Some(frame)
     }
