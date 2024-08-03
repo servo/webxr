@@ -139,6 +139,30 @@ pub enum ContextMenuResult {
     Pending,
 }
 
+#[derive(Default)]
+pub struct AppInfo {
+    application_name: String,
+    application_version: u32,
+    engine_name: String,
+    engine_version: u32,
+}
+
+impl AppInfo {
+    pub fn new(
+        application_name: &str,
+        application_version: u32,
+        engine_name: &str,
+        engine_version: u32,
+    ) -> AppInfo {
+        Self {
+            application_name: application_name.to_string(),
+            application_version,
+            engine_name: engine_name.to_string(),
+            engine_version,
+        }
+    }
+}
+
 struct ViewInfo<Eye> {
     view: openxr::View,
     extent: Extent2Di,
@@ -175,12 +199,17 @@ impl<Eye> ViewInfo<Eye> {
 
 pub struct OpenXrDiscovery {
     context_menu_provider: Option<Box<dyn ContextMenuProvider>>,
+    app_info: AppInfo,
 }
 
 impl OpenXrDiscovery {
-    pub fn new(context_menu_provider: Option<Box<dyn ContextMenuProvider>>) -> Self {
+    pub fn new(
+        context_menu_provider: Option<Box<dyn ContextMenuProvider>>,
+        app_info: AppInfo,
+    ) -> Self {
         Self {
             context_menu_provider,
+            app_info,
         }
     }
 }
@@ -199,6 +228,7 @@ pub fn create_instance(
     needs_hands: bool,
     needs_secondary: bool,
     needs_passthrough: bool,
+    app_info: &AppInfo,
 ) -> Result<CreatedInstance, String> {
     let entry = unsafe { Entry::load().map_err(|e| format!("Entry::load {:?}", e))? };
     let supported = entry
@@ -211,10 +241,10 @@ pub fn create_instance(
         && supported.msft_secondary_view_configuration
         && supported.msft_first_person_observer;
     let app_info = ApplicationInfo {
-        application_name: "firefox.reality",
-        application_version: 1,
-        engine_name: "servo",
-        engine_version: 1,
+        application_name: &app_info.application_name,
+        application_version: app_info.application_version,
+        engine_name: &app_info.engine_name,
+        engine_version: app_info.engine_version,
         api_version: Version::new(1, 0, 36),
     };
 
@@ -301,7 +331,7 @@ fn get_matching_adapter(
 }
 
 pub fn create_surfman_adapter() -> Option<SurfmanAdapter> {
-    let instance = create_instance(false, false, false).ok()?;
+    let instance = create_instance(false, false, false, &AppInfo::default()).ok()?;
     let system = instance
         .instance
         .system(FormFactor::HEAD_MOUNTED_DISPLAY)
@@ -342,8 +372,13 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
             let needs_secondary =
                 init.feature_requested("secondary-views") && init.first_person_observer_view;
             let needs_passthrough = mode == SessionMode::ImmersiveAR;
-            let instance = create_instance(needs_hands, needs_secondary, needs_passthrough)
-                .map_err(|e| Error::BackendSpecific(e))?;
+            let instance = create_instance(
+                needs_hands,
+                needs_secondary,
+                needs_passthrough,
+                &self.app_info,
+            )
+            .map_err(|e| Error::BackendSpecific(e))?;
 
             let mut supported_features = vec!["local-floor".into()];
             if instance.supports_hands {
@@ -374,7 +409,7 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
         // We'll make a "default" instance here to check the blend modes,
         // then a proper one in request_session with hands/secondary support if needed.
         let needs_passthrough = mode == SessionMode::ImmersiveAR;
-        if let Ok(instance) = create_instance(false, false, needs_passthrough) {
+        if let Ok(instance) = create_instance(false, false, needs_passthrough, &self.app_info) {
             if let Ok(blend_modes) = instance.instance.enumerate_environment_blend_modes(
                 instance.system,
                 ViewConfigurationType::PRIMARY_STEREO,
