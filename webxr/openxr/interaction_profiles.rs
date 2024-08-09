@@ -1,7 +1,8 @@
 use openxr::{
     sys::{
         BD_CONTROLLER_INTERACTION_EXTENSION_NAME, EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME,
-        EXT_SAMSUNG_ODYSSEY_CONTROLLER_EXTENSION_NAME, FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
+        EXT_SAMSUNG_ODYSSEY_CONTROLLER_EXTENSION_NAME, FB_HAND_TRACKING_AIM_EXTENSION_NAME,
+        FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
         HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME,
         HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME,
         META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME, ML_ML2_CONTROLLER_INTERACTION_EXTENSION_NAME,
@@ -16,7 +17,7 @@ macro_rules! ext_string {
     };
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InteractionProfileType {
     KhrSimpleController,
     BytedancePicoNeo3Controller,
@@ -38,10 +39,10 @@ pub enum InteractionProfileType {
     MetaTouchControllerQuest2,
     SamsungOdysseyController,
     ValveIndexController,
+    FbHandTrackingAim,
 }
 
 #[derive(Clone, Copy, Debug)]
-#[allow(unused)]
 pub struct InteractionProfile<'a> {
     pub profile_type: InteractionProfileType,
     /// The interaction profile path
@@ -334,7 +335,18 @@ pub static VALVE_INDEX_CONTROLLER_PROFILE: InteractionProfile = InteractionProfi
     profiles: &["valve-index", "generic-trigger-squeeze-touchpad-thumbstick"],
 };
 
-pub static INTERACTION_PROFILES: [InteractionProfile; 20] = [
+pub static FB_HAND_TRACKING_AIM_PROFILE: InteractionProfile = InteractionProfile {
+    profile_type: InteractionProfileType::FbHandTrackingAim,
+    path: "",
+    required_extension: Some(FB_HAND_TRACKING_AIM_EXTENSION_NAME),
+    standard_buttons: &["", "", "", ""],
+    standard_axes: &["", "", "", ""],
+    left_buttons: &[],
+    right_buttons: &[],
+    profiles: &["generic-hand-select", "generic-hand"],
+};
+
+pub static INTERACTION_PROFILES: [InteractionProfile; 21] = [
     KHR_SIMPLE_CONTROLLER_PROFILE,
     BYTEDANCE_PICO_NEO3_CONTROLLER_PROFILE,
     BYTEDANCE_PICO_4_CONTROLLER_PROFILE,
@@ -355,6 +367,7 @@ pub static INTERACTION_PROFILES: [InteractionProfile; 20] = [
     META_TOUCH_CONTROLLER_QUEST_2_PROFILE,
     SAMSUNG_ODYSSEY_CONTROLLER_PROFILE,
     VALVE_INDEX_CONTROLLER_PROFILE,
+    FB_HAND_TRACKING_AIM_PROFILE,
 ];
 
 pub fn get_profiles_from_path(path: String) -> &'static [&'static str] {
@@ -404,6 +417,10 @@ pub fn get_supported_interaction_profiles(
     if supported_extensions.meta_touch_controller_plus {
         extensions.push(ext_string!(META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME));
         enabled_extensions.meta_touch_controller_plus = true;
+    }
+    if supported_extensions.fb_hand_tracking_aim {
+        extensions.push(ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
+        enabled_extensions.fb_hand_tracking_aim = true;
     }
     extensions
 }
