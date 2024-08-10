@@ -1,6 +1,7 @@
 use openxr::{
     sys::{
-        BD_CONTROLLER_INTERACTION_EXTENSION_NAME, EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME,
+        BD_CONTROLLER_INTERACTION_EXTENSION_NAME, EXT_HAND_INTERACTION_EXTENSION_NAME,
+        EXT_HP_MIXED_REALITY_CONTROLLER_EXTENSION_NAME,
         EXT_SAMSUNG_ODYSSEY_CONTROLLER_EXTENSION_NAME, FB_HAND_TRACKING_AIM_EXTENSION_NAME,
         FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME,
         HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME,
@@ -39,6 +40,7 @@ pub enum InteractionProfileType {
     MetaTouchControllerQuest2,
     SamsungOdysseyController,
     ValveIndexController,
+    ExtHandInteraction,
     FbHandTrackingAim,
 }
 
@@ -335,6 +337,17 @@ pub static VALVE_INDEX_CONTROLLER_PROFILE: InteractionProfile = InteractionProfi
     profiles: &["valve-index", "generic-trigger-squeeze-touchpad-thumbstick"],
 };
 
+pub static EXT_HAND_INTERACTION_PROFILE: InteractionProfile = InteractionProfile {
+    profile_type: InteractionProfileType::ExtHandInteraction,
+    path: "interaction_profiles/ext/hand_interaction_ext",
+    required_extension: Some(EXT_HAND_INTERACTION_EXTENSION_NAME),
+    standard_buttons: &["pinch_ext/value", "", "", ""],
+    standard_axes: &["", "", "", ""],
+    left_buttons: &[],
+    right_buttons: &[],
+    profiles: &["generic-hand-select", "generic-hand"],
+};
+
 pub static FB_HAND_TRACKING_AIM_PROFILE: InteractionProfile = InteractionProfile {
     profile_type: InteractionProfileType::FbHandTrackingAim,
     path: "",
@@ -346,7 +359,7 @@ pub static FB_HAND_TRACKING_AIM_PROFILE: InteractionProfile = InteractionProfile
     profiles: &["generic-hand-select", "generic-hand"],
 };
 
-pub static INTERACTION_PROFILES: [InteractionProfile; 21] = [
+pub static INTERACTION_PROFILES: [InteractionProfile; 22] = [
     KHR_SIMPLE_CONTROLLER_PROFILE,
     BYTEDANCE_PICO_NEO3_CONTROLLER_PROFILE,
     BYTEDANCE_PICO_4_CONTROLLER_PROFILE,
@@ -367,6 +380,7 @@ pub static INTERACTION_PROFILES: [InteractionProfile; 21] = [
     META_TOUCH_CONTROLLER_QUEST_2_PROFILE,
     SAMSUNG_ODYSSEY_CONTROLLER_PROFILE,
     VALVE_INDEX_CONTROLLER_PROFILE,
+    EXT_HAND_INTERACTION_PROFILE,
     FB_HAND_TRACKING_AIM_PROFILE,
 ];
 
@@ -417,6 +431,10 @@ pub fn get_supported_interaction_profiles(
     if supported_extensions.meta_touch_controller_plus {
         extensions.push(ext_string!(META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME));
         enabled_extensions.meta_touch_controller_plus = true;
+    }
+    if supported_extensions.ext_hand_interaction {
+        extensions.push(ext_string!(EXT_HAND_INTERACTION_EXTENSION_NAME));
+        enabled_extensions.ext_hand_interaction = true;
     }
     if supported_extensions.fb_hand_tracking_aim {
         extensions.push(ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
