@@ -342,6 +342,11 @@ impl OpenXRInput {
                     continue;
                 }
             }
+
+            if profile.path.is_empty() {
+                continue;
+            }
+
             let select = profile.standard_buttons[0];
             let squeeze = Option::from(profile.standard_buttons[1]).filter(|&s| !s.is_empty());
             let mut bindings = right_hand.get_bindings(instance, select, squeeze, &profile);
@@ -350,18 +355,17 @@ impl OpenXRInput {
                     .get_bindings(instance, select, squeeze, &profile)
                     .into_iter(),
             );
-            if !profile.path.is_empty() {
-                let path_controller = instance
-                    .string_to_path(profile.path)
-                    .expect(format!("Invalid interaction profile path: {}", profile.path).as_str());
-                if let Err(_) =
-                    instance.suggest_interaction_profile_bindings(path_controller, &bindings)
-                {
-                    debug!(
-                        "Interaction profile path not available for this runtime: {:?}",
-                        profile.path
-                    );
-                }
+
+            let path_controller = instance
+                .string_to_path(profile.path)
+                .expect(format!("Invalid interaction profile path: {}", profile.path).as_str());
+            if let Err(_) =
+                instance.suggest_interaction_profile_bindings(path_controller, &bindings)
+            {
+                debug!(
+                    "Interaction profile path not available for this runtime: {:?}",
+                    profile.path
+                );
             }
         }
 
@@ -377,9 +381,6 @@ impl OpenXRInput {
         squeeze_name: Option<&str>,
         interaction_profile: &InteractionProfile,
     ) -> Vec<Binding> {
-        if interaction_profile.profile_type == InteractionProfileType::FbHandTrackingAim {
-            return vec![];
-        };
         let hand = hand_str(self.handedness);
         let path_aim_pose = instance
             .string_to_path(&format!("/user/hand/{}/input/aim/pose", hand))
@@ -563,24 +564,24 @@ impl OpenXRInput {
             self.squeeze_state
                 .update_from_action(&self.action_squeeze, session, menu_selected);
 
-        let hand_state = self.hand_tracker.as_ref().and_then(|tracker| {
+        let mut aim_state: Option<HandTrackingAimStateFB> = None;
+        let hand = self.hand_tracker.as_ref().and_then(|tracker| {
             Some(locate_hand(
                 base_space,
                 tracker,
                 frame_state,
                 use_alternate_input_source,
                 session,
-            ))
+                &mut aim_state,
+            ))?
         });
 
         let mut pressed = click_is_active && click.current_state;
         let squeezed = squeeze_is_active && squeeze.current_state;
 
-        let hand = hand_state.as_ref().and_then(|state| state.0.clone());
-
-        if let Some(aim_state) = hand_state.as_ref().and_then(|state| state.1) {
-            target_ray_origin.replace(super::transform(&aim_state.aim_pose));
-            let index_pinching = aim_state
+        if let Some(state) = aim_state {
+            target_ray_origin.replace(super::transform(&state.aim_pose));
+            let index_pinching = state
                 .status
                 .intersects(HandTrackingAimFlagsFB::INDEX_PINCHING);
             click_event = self
@@ -651,10 +652,8 @@ fn locate_hand(
     frame_state: &FrameState,
     use_alternate_input_source: bool,
     session: &Session<D3D11>,
-) -> (
-    Option<Box<Hand<JointFrame>>>,
-    Option<HandTrackingAimStateFB>,
-) {
+    aim_state: &mut Option<HandTrackingAimStateFB>,
+) -> Option<Box<Hand<JointFrame>>> {
     let mut state = HandTrackingAimStateFB::out(std::ptr::null_mut());
     let locations = {
         if !use_alternate_input_source {
@@ -677,10 +676,7 @@ fn locate_hand(
             };
 
             // Check if hand tracking is supported by the session instance
-            let Some(raw_hand_tracker) = session.instance().exts().ext_hand_tracking.as_ref()
-            else {
-                return (None, None);
-            };
+            let raw_hand_tracker = session.instance().exts().ext_hand_tracking.as_ref()?;
 
             unsafe {
                 Ok(
@@ -690,6 +686,7 @@ fn locate_hand(
                         &mut location_info,
                     ) {
                         openxr::sys::Result::SUCCESS if location_info.is_active.into() => {
+                            aim_state.replace(state.assume_init());
                             Some(locations.assume_init())
                         }
                         _ => None,
@@ -735,25 +732,22 @@ fn locate_hand(
             },
         }
     } else {
-        return (None, None);
+        return None;
     };
 
-    (
-        Some(Box::new(locations.map(|loc, _| {
-            loc.and_then(|location| {
-                let pose_valid = location.location_flags.intersects(
-                    SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID,
-                );
-                if pose_valid {
-                    Some(JointFrame {
-                        pose: super::transform(&location.pose),
-                        radius: location.radius,
-                    })
-                } else {
-                    None
-                }
-            })
-        }))),
-        unsafe { Some(state.assume_init()) },
-    )
+    Some(Box::new(locations.map(|loc, _| {
+        loc.and_then(|location| {
+            let pose_valid = location.location_flags.intersects(
+                SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID,
+            );
+            if pose_valid {
+                Some(JointFrame {
+                    pose: super::transform(&location.pose),
+                    radius: location.radius,
+                })
+            } else {
+                None
+            }
+        })
+    })))
 }
