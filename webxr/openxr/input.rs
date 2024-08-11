@@ -78,12 +78,18 @@ impl ClickState {
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
 
-        let select_event = self.update_from_value(click.current_state, click.is_active, menu_selected);
+        let select_event =
+            self.update_from_value(click.current_state, click.is_active, menu_selected);
 
         (click.is_active, select_event)
     }
 
-    fn update_from_value(&mut self, current_state: bool, is_active: bool, menu_selected: bool) -> Option<SelectEvent> {
+    fn update_from_value(
+        &mut self,
+        current_state: bool,
+        is_active: bool,
+        menu_selected: bool,
+    ) -> Option<SelectEvent> {
         if is_active {
             match (current_state, *self) {
                 (_, ClickState::Clicking) if menu_selected => {
@@ -110,7 +116,6 @@ impl ClickState {
         }
     }
 }
-
 
 pub struct OpenXRInput {
     id: InputId,
@@ -277,7 +282,8 @@ impl OpenXRInput {
             vec![axis1, axis2, axis3, axis4]
         };
 
-        let use_alternate_input_source = supported_interaction_profiles.contains(&ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
+        let use_alternate_input_source = supported_interaction_profiles
+            .contains(&ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
 
         Self {
             id,
