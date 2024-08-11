@@ -551,14 +551,14 @@ impl OpenXRInput {
 
         let mut aim_state: Option<HandTrackingAimStateFB> = None;
         let hand = self.hand_tracker.as_ref().and_then(|tracker| {
-            Some(locate_hand(
+            locate_hand(
                 base_space,
                 tracker,
                 frame_state,
                 self.use_alternate_input_source,
                 session,
                 &mut aim_state,
-            ))?
+            )
         });
 
         let mut pressed = click_is_active && click.current_state;
