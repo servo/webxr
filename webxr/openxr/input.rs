@@ -30,7 +30,7 @@ use super::interaction_profiles::InteractionProfile;
 use super::IDENTITY_POSE;
 
 use crate::ext_string;
-use crate::openxr::interaction_profiles::{InteractionProfileType, INTERACTION_PROFILES};
+use crate::openxr::interaction_profiles::INTERACTION_PROFILES;
 
 /// Number of frames to wait with the menu gesture before
 /// opening the menu.
