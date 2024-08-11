@@ -130,7 +130,7 @@ pub struct OpenXRInput {
     action_buttons_left: Vec<Action<f32>>,
     action_buttons_right: Vec<Action<f32>>,
     action_axes_common: Vec<Action<f32>>,
-    supported_interaction_profiles: Vec<&'static str>,
+    use_alternate_input_source: bool,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -277,6 +277,8 @@ impl OpenXRInput {
             vec![axis1, axis2, axis3, axis4]
         };
 
+        let use_alternate_input_source = supported_interaction_profiles.contains(&ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
+
         Self {
             id,
             action_aim_pose,
@@ -294,7 +296,7 @@ impl OpenXRInput {
             action_axes_common,
             action_buttons_left,
             action_buttons_right,
-            supported_interaction_profiles,
+            use_alternate_input_source,
         }
     }
 
@@ -447,9 +449,6 @@ impl OpenXRInput {
         viewer: &RigidTransform3D<f32, Viewer, Native>,
     ) -> Frame {
         use euclid::Vector3D;
-        let use_alternate_input_source = self
-            .supported_interaction_profiles
-            .contains(&ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
         let mut target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
         let grip_origin = pose_for(&self.action_grip_space, frame_state, base_space);
@@ -540,7 +539,7 @@ impl OpenXRInput {
 
         let input_changed = buttons_changed || axes_changed;
 
-        let (click_is_active, mut click_event) = if !use_alternate_input_source {
+        let (click_is_active, mut click_event) = if !self.use_alternate_input_source {
             self.click_state
                 .update_from_action(&self.action_click, session, menu_selected)
         } else {
@@ -556,7 +555,7 @@ impl OpenXRInput {
                 base_space,
                 tracker,
                 frame_state,
-                use_alternate_input_source,
+                self.use_alternate_input_source,
                 session,
                 &mut aim_state,
             ))?
