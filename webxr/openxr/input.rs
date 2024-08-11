@@ -78,11 +78,17 @@ impl ClickState {
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
 
-        let select_event = if click.is_active {
-            match (click.current_state, *self) {
+        let select_event = self.update_from_value(click.current_state, click.is_active, menu_selected);
+
+        (click.is_active, select_event)
+    }
+
+    fn update_from_value(&mut self, current_state: bool, is_active: bool, menu_selected: bool) -> Option<SelectEvent> {
+        if is_active {
+            match (current_state, *self) {
                 (_, ClickState::Clicking) if menu_selected => {
                     *self = ClickState::Done;
-                    // cancel the select, we're showing a menu
+                    // Cancel the select, we're showing a menu
                     Some(SelectEvent::End)
                 }
                 (true, ClickState::Done) => {
@@ -97,34 +103,14 @@ impl ClickState {
             }
         } else if *self == ClickState::Clicking {
             *self = ClickState::Done;
-            // cancel the select, we lost tracking
+            // Cancel the select, we lost tracking
             Some(SelectEvent::End)
         } else {
             None
-        };
-        (click.is_active, select_event)
-    }
-
-    fn update_from_value(&mut self, value: bool, menu_selected: bool) -> Option<SelectEvent> {
-        let select_event = match (value, *self) {
-            (_, ClickState::Clicking) if menu_selected => {
-                *self = ClickState::Done;
-                // cancel the select, we're showing a menu
-                Some(SelectEvent::End)
-            }
-            (true, ClickState::Done) => {
-                *self = ClickState::Clicking;
-                Some(SelectEvent::Start)
-            }
-            (false, ClickState::Clicking) => {
-                *self = ClickState::Done;
-                Some(SelectEvent::Select)
-            }
-            _ => None,
-        };
-        select_event
+        }
     }
 }
+
 
 pub struct OpenXRInput {
     id: InputId,
@@ -586,7 +572,7 @@ impl OpenXRInput {
                 .intersects(HandTrackingAimFlagsFB::INDEX_PINCHING);
             click_event = self
                 .click_state
-                .update_from_value(index_pinching, menu_selected);
+                .update_from_value(index_pinching, true, menu_selected);
             pressed = index_pinching;
         }
 
