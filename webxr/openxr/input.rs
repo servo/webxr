@@ -1,9 +1,17 @@
+use std::ffi::c_void;
+use std::mem::MaybeUninit;
+
 use euclid::RigidTransform3D;
 use log::debug;
 use openxr::d3d::D3D11;
+use openxr::sys::{
+    HandJointLocationsEXT, HandJointsLocateInfoEXT, HandTrackingAimStateFB,
+    FB_HAND_TRACKING_AIM_EXTENSION_NAME,
+};
 use openxr::{
-    self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandTracker,
-    Instance, Path, Posef, Session, Space, SpaceLocationFlags,
+    self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandJointLocation,
+    HandTracker, HandTrackingAimFlagsFB, Instance, Path, Posef, Session, Space, SpaceLocationFlags,
+    HAND_JOINT_COUNT,
 };
 use webxr_api::Finger;
 use webxr_api::Hand;
@@ -62,7 +70,7 @@ pub struct Frame {
 }
 
 impl ClickState {
-    fn update(
+    fn update_from_action(
         &mut self,
         action: &Action<bool>,
         session: &Session<D3D11>,
@@ -70,11 +78,23 @@ impl ClickState {
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
 
-        let select_event = if click.is_active {
-            match (click.current_state, *self) {
+        let select_event =
+            self.update_from_value(click.current_state, click.is_active, menu_selected);
+
+        (click.is_active, select_event)
+    }
+
+    fn update_from_value(
+        &mut self,
+        current_state: bool,
+        is_active: bool,
+        menu_selected: bool,
+    ) -> Option<SelectEvent> {
+        if is_active {
+            match (current_state, *self) {
                 (_, ClickState::Clicking) if menu_selected => {
                     *self = ClickState::Done;
-                    // cancel the select, we're showing a menu
+                    // Cancel the select, we're showing a menu
                     Some(SelectEvent::End)
                 }
                 (true, ClickState::Done) => {
@@ -89,12 +109,11 @@ impl ClickState {
             }
         } else if *self == ClickState::Clicking {
             *self = ClickState::Done;
-            // cancel the select, we lost tracking
+            // Cancel the select, we lost tracking
             Some(SelectEvent::End)
         } else {
             None
-        };
-        (click.is_active, select_event)
+        }
     }
 }
 
@@ -116,6 +135,7 @@ pub struct OpenXRInput {
     action_buttons_left: Vec<Action<f32>>,
     action_buttons_right: Vec<Action<f32>>,
     action_axes_common: Vec<Action<f32>>,
+    use_alternate_input_source: bool,
 }
 
 fn hand_str(h: Handedness) -> &'static str {
@@ -133,6 +153,7 @@ impl OpenXRInput {
         action_set: &ActionSet,
         session: &Session<D3D11>,
         needs_hands: bool,
+        supported_interaction_profiles: Vec<&'static str>,
     ) -> Self {
         let hand = hand_str(handedness);
         let action_aim_pose: Action<Posef> = action_set
@@ -261,6 +282,9 @@ impl OpenXRInput {
             vec![axis1, axis2, axis3, axis4]
         };
 
+        let use_alternate_input_source = supported_interaction_profiles
+            .contains(&ext_string!(FB_HAND_TRACKING_AIM_EXTENSION_NAME));
+
         Self {
             id,
             action_aim_pose,
@@ -278,6 +302,7 @@ impl OpenXRInput {
             action_axes_common,
             action_buttons_left,
             action_buttons_right,
+            use_alternate_input_source,
         }
     }
 
@@ -294,6 +319,7 @@ impl OpenXRInput {
             &action_set,
             &session,
             needs_hands,
+            supported_interaction_profiles.clone(),
         );
         let left_hand = OpenXRInput::new(
             InputId(1),
@@ -301,6 +327,7 @@ impl OpenXRInput {
             &action_set,
             &session,
             needs_hands,
+            supported_interaction_profiles.clone(),
         );
 
         for profile in INTERACTION_PROFILES {
@@ -309,6 +336,11 @@ impl OpenXRInput {
                     continue;
                 }
             }
+
+            if profile.path.is_empty() {
+                continue;
+            }
+
             let select = profile.standard_buttons[0];
             let squeeze = Option::from(profile.standard_buttons[1]).filter(|&s| !s.is_empty());
             let mut bindings = right_hand.get_bindings(instance, select, squeeze, &profile);
@@ -317,6 +349,7 @@ impl OpenXRInput {
                     .get_bindings(instance, select, squeeze, &profile)
                     .into_iter(),
             );
+
             let path_controller = instance
                 .string_to_path(profile.path)
                 .expect(format!("Invalid interaction profile path: {}", profile.path).as_str());
@@ -422,7 +455,7 @@ impl OpenXRInput {
         viewer: &RigidTransform3D<f32, Viewer, Native>,
     ) -> Frame {
         use euclid::Vector3D;
-        let target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
+        let mut target_ray_origin = pose_for(&self.action_aim_space, frame_state, base_space);
 
         let grip_origin = pose_for(&self.action_grip_space, frame_state, base_space);
 
@@ -512,22 +545,47 @@ impl OpenXRInput {
 
         let input_changed = buttons_changed || axes_changed;
 
-        let (click_is_active, click_event) =
+        let (click_is_active, mut click_event) = if !self.use_alternate_input_source {
             self.click_state
-                .update(&self.action_click, session, menu_selected);
+                .update_from_action(&self.action_click, session, menu_selected)
+        } else {
+            (true, None)
+        };
         let (squeeze_is_active, squeeze_event) =
             self.squeeze_state
-                .update(&self.action_squeeze, session, menu_selected);
+                .update_from_action(&self.action_squeeze, session, menu_selected);
 
-        let hand = target_ray_origin
-            .and_then(|_origin| self.hand_tracker.as_ref())
-            .and_then(|tracker| locate_hand(base_space, tracker, frame_state));
+        let mut aim_state: Option<HandTrackingAimStateFB> = None;
+        let hand = self.hand_tracker.as_ref().and_then(|tracker| {
+            locate_hand(
+                base_space,
+                tracker,
+                frame_state,
+                self.use_alternate_input_source,
+                session,
+                &mut aim_state,
+            )
+        });
+
+        let mut pressed = click_is_active && click.current_state;
+        let squeezed = squeeze_is_active && squeeze.current_state;
+
+        if let Some(state) = aim_state {
+            target_ray_origin.replace(super::transform(&state.aim_pose));
+            let index_pinching = state
+                .status
+                .intersects(HandTrackingAimFlagsFB::INDEX_PINCHING);
+            click_event = self
+                .click_state
+                .update_from_value(index_pinching, true, menu_selected);
+            pressed = index_pinching;
+        }
 
         let input_frame = InputFrame {
             target_ray_origin,
             id: self.id,
-            pressed: click_is_active && click.current_state,
-            squeezed: squeeze_is_active && squeeze.current_state,
+            pressed,
+            squeezed,
             grip_origin,
             hand,
             button_values,
@@ -583,8 +641,51 @@ fn locate_hand(
     base_space: &Space,
     tracker: &HandTracker,
     frame_state: &FrameState,
+    use_alternate_input_source: bool,
+    session: &Session<D3D11>,
+    aim_state: &mut Option<HandTrackingAimStateFB>,
 ) -> Option<Box<Hand<JointFrame>>> {
-    let locations = base_space.locate_hand_joints(tracker, frame_state.predicted_display_time);
+    let mut state = HandTrackingAimStateFB::out(std::ptr::null_mut());
+    let locations = {
+        if !use_alternate_input_source {
+            base_space.locate_hand_joints(tracker, frame_state.predicted_display_time)
+        } else {
+            let locate_info = HandJointsLocateInfoEXT {
+                ty: HandJointsLocateInfoEXT::TYPE,
+                next: std::ptr::null(),
+                base_space: base_space.as_raw(),
+                time: frame_state.predicted_display_time,
+            };
+
+            let mut locations = MaybeUninit::<[HandJointLocation; HAND_JOINT_COUNT]>::uninit();
+            let mut location_info = HandJointLocationsEXT {
+                ty: HandJointLocationsEXT::TYPE,
+                next: &mut state as *mut _ as *mut c_void,
+                is_active: false.into(),
+                joint_count: HAND_JOINT_COUNT as u32,
+                joint_locations: locations.as_mut_ptr() as _,
+            };
+
+            // Check if hand tracking is supported by the session instance
+            let raw_hand_tracker = session.instance().exts().ext_hand_tracking.as_ref()?;
+
+            unsafe {
+                Ok(
+                    match (raw_hand_tracker.locate_hand_joints)(
+                        tracker.as_raw(),
+                        &locate_info,
+                        &mut location_info,
+                    ) {
+                        openxr::sys::Result::SUCCESS if location_info.is_active.into() => {
+                            aim_state.replace(state.assume_init());
+                            Some(locations.assume_init())
+                        }
+                        _ => None,
+                    },
+                )
+            }
+        }
+    };
     let locations = if let Ok(Some(ref locations)) = locations {
         Hand {
             wrist: Some(&locations[HandJoint::WRIST]),
