@@ -72,9 +72,9 @@ use webxr_api::Viewport;
 use webxr_api::Viewports;
 use webxr_api::Views;
 use webxr_api::Visibility;
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory};
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM};
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory};
 
 mod input;
 use input::OpenXRInput;
@@ -293,9 +293,7 @@ pub fn create_instance(
     })
 }
 
-fn get_matching_adapter(
-    requirements: &Requirements,
-) -> Result<IDXGIAdapter, String> {
+fn get_matching_adapter(requirements: &Requirements) -> Result<IDXGIAdapter, String> {
     unsafe {
         // let mut factory_ptr: *mut IDXGIFactory1 = ptr::null_mut();
         let factory = CreateDXGIFactory1::<IDXGIFactory>().unwrap();
