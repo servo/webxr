@@ -84,6 +84,14 @@ pub trait DeviceAPI: 'static {
     fn cancel_hit_test(&mut self, _id: HitTestId) {
         panic!("This device does not support hit tests");
     }
+
+    fn update_frame_rate(&mut self, rate: f32) -> f32 {
+        rate
+    }
+
+    fn supported_frame_rates(&self) -> Vec<f32> {
+        Vec::new()
+    }
 }
 
 impl<GL: 'static> DiscoveryAPI<GL> for Box<dyn DiscoveryAPI<GL>> {
