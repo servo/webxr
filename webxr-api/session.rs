@@ -117,6 +117,7 @@ enum SessionMsg {
     RenderAnimationFrame,
     RequestHitTest(HitTestSource),
     CancelHitTest(HitTestId),
+    UpdateFrameRate(f32, Sender<f32>),
     Quit,
 }
 
@@ -144,6 +145,7 @@ pub struct Session {
     initial_inputs: Vec<InputSource>,
     granted_features: Vec<String>,
     id: SessionId,
+    supported_frame_rates: Vec<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -242,6 +244,14 @@ impl Session {
     pub fn cancel_hit_test(&self, id: HitTestId) {
         let _ = self.sender.send(SessionMsg::CancelHitTest(id));
     }
+
+    pub fn update_frame_rate(&mut self, rate: f32, sender: Sender<f32>) {
+        let _ = self.sender.send(SessionMsg::UpdateFrameRate(rate, sender));
+    }
+
+    pub fn supported_frame_rates(&self) -> &[f32] {
+        &self.supported_frame_rates
+    }
 }
 
 #[derive(PartialEq)]
@@ -303,6 +313,7 @@ where
         let initial_inputs = self.device.initial_inputs();
         let environment_blend_mode = self.device.environment_blend_mode();
         let granted_features = self.device.granted_features().into();
+        let supported_frame_rates = self.device.supported_frame_rates();
         Session {
             floor_transform,
             viewports,
@@ -311,6 +322,7 @@ where
             environment_blend_mode,
             granted_features,
             id: self.id,
+            supported_frame_rates,
         }
     }
 
@@ -388,6 +400,10 @@ where
                 };
 
                 let _ = self.frame_sender.send(frame);
+            }
+            SessionMsg::UpdateFrameRate(rate, sender) => {
+                let new_framerate = self.device.update_frame_rate(rate);
+                let _ = sender.send(new_framerate);
             }
             SessionMsg::Quit => {
                 if self.render_state == RenderState::NotInRenderLoop {

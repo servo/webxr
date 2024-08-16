@@ -222,6 +222,7 @@ pub struct CreatedInstance {
     supports_mutable_fov: bool,
     supported_interaction_profiles: Vec<&'static str>,
     supports_passthrough: bool,
+    supports_updating_framerate: bool,
 }
 
 pub fn create_instance(
@@ -240,6 +241,8 @@ pub fn create_instance(
     let supports_secondary = needs_secondary
         && supported.msft_secondary_view_configuration
         && supported.msft_first_person_observer;
+    let supports_updating_framerate = supported.fb_display_refresh_rate;
+
     let app_info = ApplicationInfo {
         application_name: &app_info.application_name,
         application_version: app_info.application_version,
@@ -261,6 +264,10 @@ pub fn create_instance(
 
     if supports_passthrough {
         exts.fb_passthrough = true;
+    }
+
+    if supports_updating_framerate {
+        exts.fb_display_refresh_rate = true;
     }
 
     let supported_interaction_profiles = get_supported_interaction_profiles(&supported, &mut exts);
@@ -293,6 +300,7 @@ pub fn create_instance(
         supports_mutable_fov,
         supported_interaction_profiles,
         supports_passthrough,
+        supports_updating_framerate,
     })
 }
 
@@ -439,6 +447,7 @@ struct OpenXrDevice {
     clip_planes: ClipPlanes,
     supports_secondary: bool,
     supports_mutable_fov: bool,
+    supports_updating_framerate: bool,
 
     // input
     action_set: ActionSet,
@@ -948,6 +957,7 @@ impl OpenXrDevice {
             supports_mutable_fov,
             supported_interaction_profiles,
             supports_passthrough,
+            supports_updating_framerate,
         } = instance;
 
         let (init_tx, init_rx) = crossbeam_channel::unbounded();
@@ -1153,6 +1163,7 @@ impl OpenXrDevice {
             clip_planes: Default::default(),
             supports_secondary,
             supports_mutable_fov,
+            supports_updating_framerate,
             layer_manager,
             shared_data,
 
@@ -1584,6 +1595,29 @@ impl DeviceAPI for OpenXrDevice {
 
     fn granted_features(&self) -> &[String] {
         &self.granted_features
+    }
+
+    fn update_frame_rate(&mut self, rate: f32) -> f32 {
+        if self.supports_updating_framerate {
+            self.session
+                .request_display_refresh_rate(rate)
+                .expect("Failed to request display refresh rate");
+            self.session
+                .get_display_refresh_rate()
+                .expect("Failed to get display refresh rate")
+        } else {
+            -1.0
+        }
+    }
+
+    fn supported_frame_rates(&self) -> Vec<f32> {
+        if self.supports_updating_framerate {
+            self.session
+                .enumerate_display_refresh_rates()
+                .expect("Failed to enumerate display refresh rates")
+        } else {
+            vec![]
+        }
     }
 }
 
