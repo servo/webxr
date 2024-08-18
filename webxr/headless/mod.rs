@@ -362,6 +362,7 @@ impl HeadlessDeviceData {
             events: vec![],
             sub_images,
             hit_test_results: vec![],
+            predicted_display_time: 0.0,
         }
     }
 
