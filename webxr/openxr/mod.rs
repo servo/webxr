@@ -1469,6 +1469,7 @@ impl DeviceAPI for OpenXrDevice {
             events: vec![],
             sub_images,
             hit_test_results: vec![],
+            predicted_display_time: frame_state.predicted_display_time.as_nanos() as f64,
         };
 
         if let Some(right_select) = right.select {

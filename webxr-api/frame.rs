@@ -33,6 +33,9 @@ pub struct Frame {
 
     /// The hit test results for this frame, if any
     pub hit_test_results: Vec<HitTestResult>,
+
+    /// The average point in time this XRFrame is expected to be displayed on the devices' display
+    pub predicted_display_time: f64,
 }
 
 #[derive(Clone, Debug)]
