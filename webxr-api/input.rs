@@ -27,6 +27,7 @@ pub enum TargetRayMode {
     Gaze,
     TrackedPointer,
     Screen,
+    TransientPointer,
 }
 
 #[derive(Clone, Debug)]
