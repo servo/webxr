@@ -1,6 +1,7 @@
 use crate::gl_utils::GlClearer;
 use crate::SurfmanGL;
 
+use euclid::Box2D;
 use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
@@ -388,7 +389,7 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
             )
             .map_err(|e| Error::BackendSpecific(e))?;
 
-            let mut supported_features = vec!["local-floor".into()];
+            let mut supported_features = vec!["local-floor".into(), "bounded-floor".into()];
             if instance.supports_hands {
                 supported_features.push("hand-tracking".into());
             }
@@ -1618,6 +1619,26 @@ impl DeviceAPI for OpenXrDevice {
                 .expect("Failed to enumerate display refresh rates")
         } else {
             vec![]
+        }
+    }
+
+    fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
+        match self
+            .session
+            .reference_space_bounds_rect(ReferenceSpaceType::STAGE)
+        {
+            Ok(bounds) => {
+                if let Some(bounds) = bounds {
+                    let point1 = Point2D::new(-bounds.width / 2., -bounds.height / 2.);
+                    let point2 = Point2D::new(-bounds.width / 2., bounds.height / 2.);
+                    let point3 = Point2D::new(bounds.width / 2., bounds.height / 2.);
+                    let point4 = Point2D::new(bounds.width / 2., -bounds.height / 2.);
+                    Some(Box2D::from_points([point1, point2, point3, point4]))
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
         }
     }
 }

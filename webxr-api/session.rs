@@ -22,6 +22,7 @@ use crate::Sender;
 use crate::Viewport;
 use crate::Viewports;
 
+use euclid::Box2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
@@ -146,6 +147,7 @@ pub struct Session {
     granted_features: Vec<String>,
     id: SessionId,
     supported_frame_rates: Vec<f32>,
+    reference_space_bounds: Option<Box2D<f32, Floor>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -159,6 +161,10 @@ impl Session {
 
     pub fn floor_transform(&self) -> Option<RigidTransform3D<f32, Native, Floor>> {
         self.floor_transform.clone()
+    }
+
+    pub fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
+        self.reference_space_bounds.clone()
     }
 
     pub fn initial_inputs(&self) -> &[InputSource] {
@@ -314,6 +320,7 @@ where
         let environment_blend_mode = self.device.environment_blend_mode();
         let granted_features = self.device.granted_features().into();
         let supported_frame_rates = self.device.supported_frame_rates();
+        let reference_space_bounds = self.device.reference_space_bounds();
         Session {
             floor_transform,
             viewports,
@@ -323,6 +330,7 @@ where
             granted_features,
             id: self.id,
             supported_frame_rates,
+            reference_space_bounds,
         }
     }
 
