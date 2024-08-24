@@ -14,6 +14,7 @@ pub enum BaseSpace {
     Local,
     Floor,
     Viewer,
+    BoundedFloor,
     TargetRay(InputId),
     Grip(InputId),
     Joint(InputId, Joint),

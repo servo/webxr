@@ -504,6 +504,7 @@ impl HeadlessDeviceData {
             BaseSpace::Local => RigidTransform3D::identity(),
             BaseSpace::Floor => self.floor_transform?.inverse().cast_unit(),
             BaseSpace::Viewer => self.viewer_origin?.cast_unit(),
+            BaseSpace::BoundedFloor => self.floor_transform?.inverse().cast_unit(),
             BaseSpace::TargetRay(id) => self
                 .inputs
                 .iter()

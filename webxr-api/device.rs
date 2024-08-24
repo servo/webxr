@@ -24,6 +24,7 @@ use crate::SessionInit;
 use crate::SessionMode;
 use crate::Viewports;
 
+use euclid::Box2D;
 use euclid::RigidTransform3D;
 
 /// A trait for discovering XR devices
@@ -91,6 +92,10 @@ pub trait DeviceAPI: 'static {
 
     fn supported_frame_rates(&self) -> Vec<f32> {
         Vec::new()
+    }
+
+    fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
+        None
     }
 }
 
