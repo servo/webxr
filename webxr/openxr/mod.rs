@@ -24,9 +24,9 @@ use openxr::{
 use sparkle::gl;
 use sparkle::gl::GLuint;
 use std::collections::HashMap;
+use std::ffi::c_void;
 use std::mem;
 use std::ops::Deref;
-use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -73,12 +73,9 @@ use webxr_api::Viewport;
 use webxr_api::Viewports;
 use webxr_api::Views;
 use webxr_api::Visibility;
-use winapi::shared::dxgi;
-use winapi::shared::dxgiformat;
-use winapi::shared::winerror::{DXGI_ERROR_NOT_FOUND, S_OK};
-use winapi::um::d3d11::ID3D11Texture2D;
-use winapi::Interface;
-use wio::com::ComPtr;
+use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM};
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory};
 
 mod input;
 use input::OpenXRInput;
@@ -305,30 +302,20 @@ pub fn create_instance(
     })
 }
 
-fn get_matching_adapter(
-    requirements: &Requirements,
-) -> Result<ComPtr<dxgi::IDXGIAdapter1>, String> {
+fn get_matching_adapter(requirements: &Requirements) -> Result<IDXGIAdapter, String> {
     unsafe {
-        let mut factory_ptr: *mut dxgi::IDXGIFactory1 = ptr::null_mut();
-        let result = dxgi::CreateDXGIFactory1(
-            &dxgi::IDXGIFactory1::uuidof(),
-            &mut factory_ptr as *mut _ as *mut _,
-        );
-        assert_eq!(result, S_OK);
-        let factory = ComPtr::from_raw(factory_ptr);
+        // let mut factory_ptr: *mut IDXGIFactory1 = ptr::null_mut();
+        let factory = CreateDXGIFactory1::<IDXGIFactory>().unwrap();
 
         let index = 0;
         loop {
-            let mut adapter_ptr = ptr::null_mut();
-            let result = factory.EnumAdapters1(index, &mut adapter_ptr);
-            if result == DXGI_ERROR_NOT_FOUND {
-                return Err("No matching adapter".to_owned());
-            }
-            assert_eq!(result, S_OK);
-            let adapter = ComPtr::from_raw(adapter_ptr);
-            let mut adapter_desc = mem::zeroed();
-            let result = adapter.GetDesc1(&mut adapter_desc);
-            assert_eq!(result, S_OK);
+            //let mut adapter_ptr = ptr::null_mut();
+            let adapter = factory.EnumAdapters(index).unwrap();
+            // if result == DXGI_ERROR_NOT_FOUND {
+            //     return Err("No matching adapter".to_owned());
+            // }
+            let adapter_desc = adapter.GetDesc().unwrap();
+            // assert_eq!(result, S_OK);
             let adapter_luid = &adapter_desc.AdapterLuid;
             if adapter_luid.LowPart == requirements.adapter_luid.LowPart
                 && adapter_luid.HighPart == requirements.adapter_luid.HighPart
@@ -348,18 +335,18 @@ pub fn create_surfman_adapter() -> Option<SurfmanAdapter> {
 
     let requirements = D3D11::requirements(&instance.instance, system).ok()?;
     let adapter = get_matching_adapter(&requirements).ok()?;
-    Some(SurfmanAdapter::from_dxgi_adapter(adapter.up()))
+    Some(SurfmanAdapter::from_dxgi_adapter(adapter))
 }
 
-fn pick_format(formats: &[dxgiformat::DXGI_FORMAT]) -> dxgiformat::DXGI_FORMAT {
+fn pick_format(formats: &[u32]) -> u32 {
     // TODO: extract the format from surfman's device and pick a matching
     // valid format based on that. For now, assume that eglChooseConfig will
     // gravitate to B8G8R8A8.
     warn!("Available formats: {:?}", formats);
     for format in formats {
-        match *format {
-            dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM => return *format,
-            //dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM => return *format,
+        match DXGI_FORMAT(*format as i32) {
+            DXGI_FORMAT_B8G8R8A8_UNORM => return *format,
+            //DXGI_FORMAT_R8G8B8A8_UNORM => return *format,
             f => {
                 warn!("Backend requested unsupported format {:?}", f);
             }
@@ -525,7 +512,7 @@ impl OpenXrLayerManager {
         // Get the current surfman device and extract its D3D device. This will ensure
         // that the OpenXR runtime's texture will be shareable with surfman's surfaces.
         let native_device = device.native_device();
-        let d3d_device = native_device.d3d11_device;
+        let mut d3d_device = native_device.d3d11_device;
 
         // FIXME: we should be using these graphics requirements to drive the actual
         //        d3d device creation, rather than assuming the device that surfman
@@ -540,7 +527,7 @@ impl OpenXrLayerManager {
                 .create_session::<D3D11>(
                     system,
                     &SessionCreateInfoD3D11 {
-                        device: d3d_device as *mut _,
+                        device: std::ptr::from_mut(&mut d3d_device) as *mut c_void,
                     },
                 )
                 .map_err(|e| Error::BackendSpecific(format!("Instance::create_session {:?}", e)))
@@ -584,12 +571,11 @@ impl OpenXrLayer {
             return Ok(result);
         }
         unsafe {
-            let image = ComPtr::from_raw(self.images[index] as *mut ID3D11Texture2D);
-            image.AddRef();
+            let image = self.images[index] as *mut ID3D11Texture2D;
             let surface_texture = device.create_surface_texture_from_texture(
                 context,
                 &self.size.to_untyped(),
-                image,
+                (*image).clone(),
             )?;
             *result = Some(surface_texture);
         }
