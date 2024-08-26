@@ -3,15 +3,14 @@ use std::mem::MaybeUninit;
 
 use euclid::RigidTransform3D;
 use log::debug;
-use openxr::d3d::D3D11;
 use openxr::sys::{
     HandJointLocationsEXT, HandJointsLocateInfoEXT, HandTrackingAimStateFB,
     FB_HAND_TRACKING_AIM_EXTENSION_NAME,
 };
 use openxr::{
-    self, Action, ActionSet, Binding, FrameState, Hand as HandEnum, HandJoint, HandJointLocation,
-    HandTracker, HandTrackingAimFlagsFB, Instance, Path, Posef, Session, Space, SpaceLocationFlags,
-    HAND_JOINT_COUNT,
+    self, Action, ActionSet, Binding, FrameState, Graphics, Hand as HandEnum, HandJoint,
+    HandJointLocation, HandTracker, HandTrackingAimFlagsFB, Instance, Path, Posef, Session, Space,
+    SpaceLocationFlags, HAND_JOINT_COUNT,
 };
 use webxr_api::Finger;
 use webxr_api::Hand;
@@ -70,10 +69,10 @@ pub struct Frame {
 }
 
 impl ClickState {
-    fn update_from_action(
+    fn update_from_action<G: Graphics>(
         &mut self,
         action: &Action<bool>,
-        session: &Session<D3D11>,
+        session: &Session<G>,
         menu_selected: bool,
     ) -> (/* is_active */ bool, Option<SelectEvent>) {
         let click = action.state(session, Path::NULL).unwrap();
@@ -147,11 +146,11 @@ fn hand_str(h: Handedness) -> &'static str {
 }
 
 impl OpenXRInput {
-    pub fn new(
+    pub fn new<G: Graphics>(
         id: InputId,
         handedness: Handedness,
         action_set: &ActionSet,
-        session: &Session<D3D11>,
+        session: &Session<G>,
         needs_hands: bool,
         supported_interaction_profiles: Vec<&'static str>,
     ) -> Self {
@@ -306,9 +305,9 @@ impl OpenXRInput {
         }
     }
 
-    pub fn setup_inputs(
+    pub fn setup_inputs<G: Graphics>(
         instance: &Instance,
-        session: &Session<D3D11>,
+        session: &Session<G>,
         needs_hands: bool,
         supported_interaction_profiles: Vec<&'static str>,
     ) -> (ActionSet, Self, Self) {
@@ -447,9 +446,9 @@ impl OpenXRInput {
         ret
     }
 
-    pub fn frame(
+    pub fn frame<G: Graphics>(
         &mut self,
-        session: &Session<D3D11>,
+        session: &Session<G>,
         frame_state: &FrameState,
         base_space: &Space,
         viewer: &RigidTransform3D<f32, Viewer, Native>,
@@ -637,12 +636,12 @@ fn pose_for(
     }
 }
 
-fn locate_hand(
+fn locate_hand<G: Graphics>(
     base_space: &Space,
     tracker: &HandTracker,
     frame_state: &FrameState,
     use_alternate_input_source: bool,
-    session: &Session<D3D11>,
+    session: &Session<G>,
     aim_state: &mut Option<HandTrackingAimStateFB>,
 ) -> Option<Box<Hand<JointFrame>>> {
     let mut state = HandTrackingAimStateFB::out(std::ptr::null_mut());
