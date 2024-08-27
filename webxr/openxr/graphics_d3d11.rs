@@ -21,7 +21,7 @@ use wio::com::ComPtr;
 use crate::openxr::graphics::{GraphicsProvider, GraphicsProviderMethods};
 use crate::openxr::{create_instance, AppInfo};
 
-pub type GraphicsProviderType = D3D11;
+pub type Backend = D3D11;
 
 impl GraphicsProviderMethods<D3D11> for GraphicsProvider {
     fn enable_graphics_extensions(exts: &mut ExtensionSet) {

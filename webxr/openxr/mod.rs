@@ -80,7 +80,7 @@ use graphics::{GraphicsProvider, GraphicsProviderMethods};
 #[cfg(target_os = "windows")]
 mod graphics_d3d11;
 #[cfg(target_os = "windows")]
-use graphics_d3d11::GraphicsProviderType;
+use graphics_d3d11::Backend;
 
 const HEIGHT: f32 = 1.4;
 
@@ -372,7 +372,7 @@ impl DiscoveryAPI<SurfmanGL> for OpenXrDiscovery {
 }
 
 struct OpenXrDevice {
-    session: Arc<Session<GraphicsProviderType>>,
+    session: Arc<Session<Backend>>,
     instance: Instance,
     events: EventBuffer,
     frame_waiter: FrameWaiter,
@@ -408,9 +408,9 @@ struct SharedData {
 }
 
 struct OpenXrLayerManager {
-    session: Arc<Session<GraphicsProviderType>>,
+    session: Arc<Session<Backend>>,
     shared_data: Arc<Mutex<Option<SharedData>>>,
-    frame_stream: FrameStream<GraphicsProviderType>,
+    frame_stream: FrameStream<Backend>,
     layers: Vec<(ContextId, LayerId)>,
     openxr_layers: HashMap<LayerId, OpenXrLayer>,
     clearer: GlClearer,
@@ -419,19 +419,19 @@ struct OpenXrLayerManager {
 }
 
 struct OpenXrLayer {
-    swapchain: Swapchain<GraphicsProviderType>,
+    swapchain: Swapchain<Backend>,
     depth_stencil_texture: Option<GLuint>,
     size: Size2D<i32, Viewport>,
-    images: Vec<<GraphicsProviderType as Graphics>::SwapchainImage>,
+    images: Vec<<Backend as Graphics>::SwapchainImage>,
     surface_textures: Vec<Option<SurfaceTexture>>,
     waited: bool,
 }
 
 impl OpenXrLayerManager {
     fn new(
-        session: Arc<Session<GraphicsProviderType>>,
+        session: Arc<Session<Backend>>,
         shared_data: Arc<Mutex<Option<SharedData>>>,
-        frame_stream: FrameStream<GraphicsProviderType>,
+        frame_stream: FrameStream<Backend>,
         should_reverse_winding: bool,
         _passthrough: Option<Passthrough>,
         passthrough_layer: Option<PassthroughLayer>,
@@ -454,7 +454,7 @@ impl OpenXrLayerManager {
 
 impl OpenXrLayer {
     fn new(
-        swapchain: Swapchain<GraphicsProviderType>,
+        swapchain: Swapchain<Backend>,
         depth_stencil_texture: Option<GLuint>,
         size: Size2D<i32, Viewport>,
     ) -> Result<OpenXrLayer, Error> {
@@ -680,8 +680,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                 space: openxr::sys::Space::from_raw(0),
                 layer_handle: *passthrough_layer.inner(),
             };
-            let passthrough_base =
-                &clp as *const _ as *const CompositionLayerBase<GraphicsProviderType>;
+            let passthrough_base = &clp as *const _ as *const CompositionLayerBase<Backend>;
             unsafe {
                 primary_layers.insert(0, &*passthrough_base);
             }
