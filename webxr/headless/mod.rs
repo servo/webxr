@@ -4,7 +4,7 @@
 
 use crate::SurfmanGL;
 use crate::SurfmanLayerManager;
-use euclid::RigidTransform3D;
+use euclid::{Point2D, RigidTransform3D};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use surfman::chains::SwapChains;
@@ -64,6 +64,7 @@ struct HeadlessDeviceData {
     disconnected: bool,
     world: Option<MockWorld>,
     next_id: u32,
+    bounds_geometry: Vec<Point2D<f32, Floor>>,
 }
 
 impl MockDiscoveryAPI<SurfmanGL> for HeadlessMockDiscovery {
@@ -86,6 +87,7 @@ impl MockDiscoveryAPI<SurfmanGL> for HeadlessMockDiscovery {
             disconnected: false,
             world: init.world,
             next_id: 0,
+            bounds_geometry: vec![],
         };
         let data = Arc::new(Mutex::new(data));
         let data_ = data.clone();
@@ -305,6 +307,11 @@ impl DeviceAPI for HeadlessDevice {
     fn cancel_hit_test(&mut self, id: HitTestId) {
         self.hit_tests.cancel_hit_test(id)
     }
+
+    fn reference_space_bounds(&self) -> Option<Vec<Point2D<f32, Floor>>> {
+        let bounds = self.data.lock().unwrap().bounds_geometry.clone();
+        Some(bounds)
+    }
 }
 
 impl HeadlessMockDiscovery {
@@ -494,6 +501,9 @@ impl HeadlessDeviceData {
                 // notify the client that we're done disconnecting
                 let _ = s.send(());
                 return false;
+            }
+            MockDeviceMsg::SetBoundsGeometry(g) => {
+                self.bounds_geometry = g;
             }
         }
         true

@@ -1523,7 +1523,7 @@ impl DeviceAPI for OpenXrDevice {
         }
     }
 
-    fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
+    fn reference_space_bounds(&self) -> Option<Vec<Point2D<f32, Floor>>> {
         match self
             .session
             .reference_space_bounds_rect(ReferenceSpaceType::STAGE)
@@ -1534,7 +1534,7 @@ impl DeviceAPI for OpenXrDevice {
                     let point2 = Point2D::new(-bounds.width / 2., bounds.height / 2.);
                     let point3 = Point2D::new(bounds.width / 2., bounds.height / 2.);
                     let point4 = Point2D::new(bounds.width / 2., -bounds.height / 2.);
-                    Some(Box2D::from_points([point1, point2, point3, point4]))
+                    Some(vec![point1, point2, point3, point4])
                 } else {
                     None
                 }
