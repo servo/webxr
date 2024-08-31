@@ -22,7 +22,7 @@ use crate::Sender;
 use crate::Viewport;
 use crate::Viewports;
 
-use euclid::Box2D;
+use euclid::Point2D;
 use euclid::Rect;
 use euclid::RigidTransform3D;
 use euclid::Size2D;
@@ -120,6 +120,7 @@ enum SessionMsg {
     CancelHitTest(HitTestId),
     UpdateFrameRate(f32, Sender<f32>),
     Quit,
+    GetBoundsGeometry(Sender<Option<Vec<Point2D<f32, Floor>>>>),
 }
 
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
@@ -147,7 +148,6 @@ pub struct Session {
     granted_features: Vec<String>,
     id: SessionId,
     supported_frame_rates: Vec<f32>,
-    reference_space_bounds: Option<Box2D<f32, Floor>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -163,8 +163,10 @@ impl Session {
         self.floor_transform.clone()
     }
 
-    pub fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
-        self.reference_space_bounds.clone()
+    pub fn reference_space_bounds(&self) -> Option<Vec<Point2D<f32, Floor>>> {
+        let (sender, receiver) = channel().ok()?;
+        let _ = self.sender.send(SessionMsg::GetBoundsGeometry(sender));
+        receiver.recv().ok()?
     }
 
     pub fn initial_inputs(&self) -> &[InputSource] {
@@ -320,7 +322,6 @@ where
         let environment_blend_mode = self.device.environment_blend_mode();
         let granted_features = self.device.granted_features().into();
         let supported_frame_rates = self.device.supported_frame_rates();
-        let reference_space_bounds = self.device.reference_space_bounds();
         Session {
             floor_transform,
             viewports,
@@ -330,7 +331,6 @@ where
             granted_features,
             id: self.id,
             supported_frame_rates,
-            reference_space_bounds,
         }
     }
 
@@ -420,6 +420,10 @@ where
                 } else {
                     self.render_state = RenderState::PendingQuit;
                 }
+            }
+            SessionMsg::GetBoundsGeometry(sender) => {
+                let bounds = self.device.reference_space_bounds();
+                let _ = sender.send(bounds);
             }
         }
         true

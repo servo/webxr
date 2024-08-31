@@ -24,7 +24,7 @@ use crate::Viewer;
 use crate::Viewport;
 use crate::Visibility;
 
-use euclid::{Rect, RigidTransform3D, Transform3D};
+use euclid::{Point2D, Rect, RigidTransform3D, Transform3D};
 
 #[cfg(feature = "ipc")]
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,7 @@ pub enum MockDeviceMsg {
     SetWorld(MockWorld),
     ClearWorld,
     Disconnect(Sender<()>),
+    SetBoundsGeometry(Vec<Point2D<f32, Floor>>),
 }
 
 #[derive(Clone, Debug)]

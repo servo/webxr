@@ -24,8 +24,7 @@ use crate::SessionInit;
 use crate::SessionMode;
 use crate::Viewports;
 
-use euclid::Box2D;
-use euclid::RigidTransform3D;
+use euclid::{Point2D, RigidTransform3D};
 
 /// A trait for discovering XR devices
 pub trait DiscoveryAPI<GL>: 'static {
@@ -94,7 +93,7 @@ pub trait DeviceAPI: 'static {
         Vec::new()
     }
 
-    fn reference_space_bounds(&self) -> Option<Box2D<f32, Floor>> {
+    fn reference_space_bounds(&self) -> Option<Vec<Point2D<f32, Floor>>> {
         None
     }
 }
