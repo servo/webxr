@@ -288,7 +288,11 @@ pub fn create_instance(
         let properties = instance
             .view_configuration_properties(system, ViewConfigurationType::PRIMARY_STEREO)
             .map_err(|e| format!("Instance::view_configuration_properties {:?}", e))?;
-        properties.fov_mutable
+        // Unfortunately we need to do a platform check here as just flipping the FOVs for the
+        // composition layer is seemingly no longer sufficient. As long as windows sessions are
+        // solely backed by D3D11, we'll need to apply the same inverted view + reversed winding
+        // fix for SteamVR as well as Oculus.
+        properties.fov_mutable && !cfg!(target_os = "windows")
     };
 
     Ok(CreatedInstance {
@@ -623,11 +627,14 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         let openxr_layers = &self.openxr_layers;
 
         // Invert the up/down angles so that openxr flips the texture in the y axis.
+        // Additionally, swap between the L/R views to compensate for inverted up/down FOVs.
         // This has no effect in runtimes that don't support fovMutable
         let mut l_fov = data.left.view.fov;
         let mut r_fov = data.right.view.fov;
-        std::mem::swap(&mut l_fov.angle_up, &mut l_fov.angle_down);
-        std::mem::swap(&mut r_fov.angle_up, &mut r_fov.angle_down);
+        if cfg!(target_os = "windows") {
+            std::mem::swap(&mut l_fov.angle_up, &mut r_fov.angle_down);
+            std::mem::swap(&mut r_fov.angle_up, &mut l_fov.angle_down);
+        }
 
         let viewports = data.viewports();
         let primary_views = layers
