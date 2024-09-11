@@ -12,7 +12,7 @@ use webxr_api::util::{self, ClipPlanes, HitTestList};
 use webxr_api::{
     ApiSpace, BaseSpace, ContextId, DeviceAPI, DiscoveryAPI, Error, Event, EventBuffer, Floor,
     Frame, FrameUpdateEvent, HitTestId, HitTestResult, HitTestSource, Input, InputFrame, InputId,
-    InputSource, LayerGrandManager, LayerId, LayerInit, LayerManager, MockDeviceInit,
+    InputSource, LayerGrandManager, LayerId, LayerInit, LayerManager, MockButton, MockDeviceInit,
     MockDeviceMsg, MockDiscoveryAPI, MockInputMsg, MockViewInit, MockViewsInit, MockWorld, Native,
     Quitter, Ray, Receiver, SelectEvent, SelectKind, Sender, Session, SessionBuilder, SessionInit,
     SessionMode, Space, SubImages, View, Viewer, ViewerPose, Viewports, Views,
@@ -33,6 +33,7 @@ struct InputInfo {
     pointer: Option<RigidTransform3D<f32, Input, Native>>,
     grip: Option<RigidTransform3D<f32, Input, Native>>,
     clicking: bool,
+    buttons: Vec<MockButton>,
 }
 
 struct HeadlessDevice {
@@ -421,6 +422,7 @@ impl HeadlessDeviceData {
                     grip: init.grip_origin,
                     active: true,
                     clicking: false,
+                    buttons: init.supported_buttons,
                 });
                 with_all_sessions!(self, |s| s
                     .events
@@ -490,6 +492,22 @@ impl HeadlessDeviceData {
                                     .events
                                     .callback(Event::AddInput(input.source.clone())));
                                 input.active = true;
+                            }
+                        }
+                        MockInputMsg::SetSupportedButtons(buttons) => {
+                            input.buttons = buttons;
+                            with_all_sessions!(self, |s| s.events.callback(Event::UpdateInput(
+                                input.source.id,
+                                input.source.clone()
+                            )));
+                        }
+                        MockInputMsg::UpdateButtonState(state) => {
+                            if let Some(button) = input
+                                .buttons
+                                .iter_mut()
+                                .find(|b| b.button_type == state.button_type)
+                            {
+                                *button = state;
                             }
                         }
                     }
