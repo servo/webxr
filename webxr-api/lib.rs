@@ -70,6 +70,8 @@ pub use layer::LayerManagerFactory;
 pub use layer::SubImage;
 pub use layer::SubImages;
 
+pub use mock::MockButton;
+pub use mock::MockButtonType;
 pub use mock::MockDeviceInit;
 pub use mock::MockDeviceMsg;
 pub use mock::MockDiscoveryAPI;

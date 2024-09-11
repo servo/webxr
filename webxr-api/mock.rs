@@ -89,6 +89,7 @@ pub struct MockInputInit {
     pub source: InputSource,
     pub pointer_origin: Option<RigidTransform3D<f32, Input, Native>>,
     pub grip_origin: Option<RigidTransform3D<f32, Input, Native>>,
+    pub supported_buttons: Vec<MockButton>,
 }
 
 #[derive(Debug)]
@@ -105,6 +106,8 @@ pub enum MockInputMsg {
     TriggerSelect(SelectKind, SelectEvent),
     Disconnect,
     Reconnect,
+    SetSupportedButtons(Vec<MockButton>),
+    UpdateButtonState(MockButton),
 }
 
 #[derive(Clone, Debug)]
@@ -118,4 +121,25 @@ pub struct MockRegion {
 #[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
 pub struct MockWorld {
     pub regions: Vec<MockRegion>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub enum MockButtonType {
+    Grip,
+    Touchpad,
+    Thumbstick,
+    OptionalButton,
+    OptionalThumbstick,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "ipc", derive(Serialize, Deserialize))]
+pub struct MockButton {
+    pub button_type: MockButtonType,
+    pub pressed: bool,
+    pub touched: bool,
+    pub pressed_value: f32,
+    pub x_value: f32,
+    pub y_value: f32,
 }
