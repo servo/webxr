@@ -523,6 +523,11 @@ impl HeadlessDeviceData {
             MockDeviceMsg::SetBoundsGeometry(g) => {
                 self.bounds_geometry = g;
             }
+            MockDeviceMsg::SimulateResetPose => {
+                with_all_sessions!(self, |s| s
+                    .events
+                    .callback(Event::ReferenceSpaceChanged(BaseSpace::Local, RigidTransform3D::identity())));
+            }
         }
         true
     }

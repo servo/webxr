@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use euclid::RigidTransform3D;
+
+use crate::ApiSpace;
+use crate::BaseSpace;
 use crate::Frame;
 use crate::InputFrame;
 use crate::InputId;
@@ -25,7 +29,10 @@ pub enum Event {
     VisibilityChange(Visibility),
     /// Selection started / ended
     Select(InputId, SelectKind, SelectEvent, Frame),
+    /// Input from an input source has changed
     InputChanged(InputId, InputFrame),
+    /// Reference space has changed
+    ReferenceSpaceChanged(BaseSpace, RigidTransform3D<f32, ApiSpace, ApiSpace>),
 }
 
 #[derive(Copy, Clone, Debug)]

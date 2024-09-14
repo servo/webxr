@@ -81,6 +81,7 @@ pub enum MockDeviceMsg {
     ClearWorld,
     Disconnect(Sender<()>),
     SetBoundsGeometry(Vec<Point2D<f32, Floor>>),
+    SimulateResetPose,
 }
 
 #[derive(Clone, Debug)]

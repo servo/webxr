@@ -34,6 +34,7 @@ use surfman::Error as SurfmanError;
 use surfman::SurfaceTexture;
 use webxr_api;
 use webxr_api::util::{self, ClipPlanes};
+use webxr_api::BaseSpace;
 use webxr_api::Capture;
 use webxr_api::ContextId;
 use webxr_api::DeviceAPI;
@@ -1161,6 +1162,18 @@ impl OpenXrDevice {
                             error!("Failed to get interaction profile: {:?}", e);
                         }
                     }
+                }
+                Some(ReferenceSpaceChangePending(e)) => {
+                    let base_space = match e.reference_space_type() {
+                        ReferenceSpaceType::VIEW => BaseSpace::Viewer,
+                        ReferenceSpaceType::LOCAL => BaseSpace::Local,
+                        ReferenceSpaceType::LOCAL_FLOOR => BaseSpace::Floor,
+                        ReferenceSpaceType::STAGE => BaseSpace::BoundedFloor,
+                        _ => unreachable!("Should not be receiving change events for unsupported space types"),
+                    };
+                    let transform = transform(&e.pose_in_previous_space());
+                    self.events
+                        .callback(Event::ReferenceSpaceChanged(base_space, transform));
                 }
                 Some(_) => {
                     // FIXME: Handle other events
