@@ -8,7 +8,7 @@ use euclid::RigidTransform3D;
 /// it comes from client side code"
 pub struct ApiSpace;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "ipc", derive(serde::Serialize, serde::Deserialize))]
 pub enum BaseSpace {
     Local,
