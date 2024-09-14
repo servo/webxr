@@ -1169,7 +1169,9 @@ impl OpenXrDevice {
                         ReferenceSpaceType::LOCAL => BaseSpace::Local,
                         ReferenceSpaceType::LOCAL_FLOOR => BaseSpace::Floor,
                         ReferenceSpaceType::STAGE => BaseSpace::BoundedFloor,
-                        _ => unreachable!("Should not be receiving change events for unsupported space types"),
+                        _ => unreachable!(
+                            "Should not be receiving change events for unsupported space types"
+                        ),
                     };
                     let transform = transform(&e.pose_in_previous_space());
                     self.events
