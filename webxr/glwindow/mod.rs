@@ -2,12 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+use crate::gl_utils::framebuffer;
 use crate::{SurfmanGL, SurfmanLayerManager};
+use core::slice;
 use euclid::{
     Angle, Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, UnknownUnit, Vector3D,
 };
-use sparkle::gl::{self, GLuint, Gl};
+use glow::{self as gl, Context as Gl, HasContext};
 use std::ffi::c_void;
+use std::num::NonZeroU32;
 use std::rc::Rc;
 use surfman::chains::{PreserveBuffer, SwapChain, SwapChainAPI, SwapChains, SwapChainsAPI};
 use surfman::{
@@ -130,7 +133,7 @@ pub struct GlWindowDevice {
     layer_manager: Option<LayerManager>,
     target_swap_chain: Option<SwapChain<SurfmanDevice>>,
     swap_chains: SwapChains<LayerId, SurfmanDevice>,
-    read_fbo: GLuint,
+    read_fbo: Option<gl::NativeFramebuffer>,
     events: EventBuffer,
     clip_planes: ClipPlanes,
     granted_features: Vec<String>,
@@ -199,7 +202,7 @@ impl DeviceAPI for GlWindowDevice {
     fn end_animation_frame(&mut self, layers: &[(ContextId, LayerId)]) {
         log::debug!("End animation frame for layers {:?}", layers);
         self.device.make_context_current(&self.context).unwrap();
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        debug_assert_eq!(unsafe { self.gl.get_error() }, gl::NO_ERROR);
 
         let _ = self.layer_manager().unwrap().end_frame(layers);
 
@@ -212,19 +215,21 @@ impl DeviceAPI for GlWindowDevice {
             .unwrap()
             .map(|info| info.framebuffer_object)
             .unwrap_or(0);
-        self.gl
-            .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
-        debug_assert_eq!(
-            (
-                self.gl.get_error(),
-                self.gl.check_framebuffer_status(gl::FRAMEBUFFER)
-            ),
-            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
-        );
+        unsafe {
+            self.gl
+                .bind_framebuffer(gl::FRAMEBUFFER, framebuffer(framebuffer_object));
+            debug_assert_eq!(
+                (
+                    self.gl.get_error(),
+                    self.gl.check_framebuffer_status(gl::FRAMEBUFFER)
+                ),
+                (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+            );
 
-        self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
-        self.gl.clear(gl::COLOR_BUFFER_BIT);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+            self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            self.gl.clear(gl::COLOR_BUFFER_BIT);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        }
 
         for &(_, layer_id) in layers {
             let swap_chain = match self.swap_chains.get(layer_id) {
@@ -240,9 +245,10 @@ impl DeviceAPI for GlWindowDevice {
                 .device
                 .create_surface_texture(&mut self.context, surface)
                 .unwrap();
-            let texture_id = self.device.surface_texture_object(&surface_texture);
+            let raw_texture_id = self.device.surface_texture_object(&surface_texture);
+            let texture_id = NonZeroU32::new(raw_texture_id).map(gl::NativeTexture);
             let texture_target = self.device.surface_gl_texture_target();
-            log::debug!("Presenting texture {}", texture_id);
+            log::debug!("Presenting texture {}", raw_texture_id);
 
             if let Some(ref shader) = self.shader {
                 shader.draw_texture(
@@ -255,7 +261,7 @@ impl DeviceAPI for GlWindowDevice {
             } else {
                 self.blit_texture(texture_id, texture_target, texture_size, window_size);
             }
-            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+            debug_assert_eq!(unsafe { self.gl.get_error() }, gl::NO_ERROR);
 
             let surface = self
                 .device
@@ -287,7 +293,7 @@ impl DeviceAPI for GlWindowDevice {
             }
         }
 
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        debug_assert_eq!(unsafe { self.gl.get_error() }, gl::NO_ERROR);
     }
 
     fn initial_inputs(&self) -> Vec<InputSource> {
@@ -319,7 +325,11 @@ impl DeviceAPI for GlWindowDevice {
 
 impl Drop for GlWindowDevice {
     fn drop(&mut self) {
-        self.gl.delete_framebuffers(&[self.read_fbo]);
+        if let Some(read_fbo) = self.read_fbo {
+            unsafe {
+                self.gl.delete_framebuffer(read_fbo);
+            }
+        }
         let _ = self.device.destroy_context(&mut self.context);
     }
 }
@@ -340,14 +350,16 @@ impl GlWindowDevice {
         let mut context = device.create_context(&context_descriptor, None).unwrap();
         device.make_context_current(&context).unwrap();
 
-        let gl = match device.gl_api() {
-            GLApi::GL => Gl::gl_fns(gl::ffi_gl::Gl::load_with(|symbol_name| {
-                device.get_proc_address(&context, symbol_name)
-            })),
-            GLApi::GLES => Gl::gles_fns(gl::ffi_gles::Gles2::load_with(|symbol_name| {
-                device.get_proc_address(&context, symbol_name)
-            })),
-        };
+        let gl = Rc::new(unsafe {
+            match device.gl_api() {
+                GLApi::GL => Gl::from_loader_function(|symbol_name| {
+                    device.get_proc_address(&context, symbol_name)
+                }),
+                GLApi::GLES => Gl::from_loader_function(|symbol_name| {
+                    device.get_proc_address(&context, symbol_name)
+                }),
+            }
+        });
 
         let target_swap_chain = match window.get_render_target(&mut device, &mut context) {
             GlWindowRenderTarget::NativeWidget(native_widget) => {
@@ -366,31 +378,33 @@ impl GlWindowDevice {
             }
         };
 
-        let read_fbo = gl.gen_framebuffers(1)[0];
-        let framebuffer_object = device
-            .context_surface_info(&context)
-            .unwrap()
-            .map(|info| info.framebuffer_object)
-            .unwrap_or(0);
-        gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
-        debug_assert_eq!(
-            (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
-            (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
-        );
+        let read_fbo = unsafe { gl.create_framebuffer().ok() };
+        unsafe {
+            let framebuffer_object = device
+                .context_surface_info(&context)
+                .unwrap()
+                .map(|info| info.framebuffer_object)
+                .unwrap_or(0);
+            gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer(framebuffer_object));
+            debug_assert_eq!(
+                (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
+                (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
+            );
 
-        gl.enable(gl::BLEND);
-        gl.blend_func_separate(
-            gl::SRC_ALPHA,
-            gl::ONE_MINUS_SRC_ALPHA,
-            gl::ONE,
-            gl::ONE_MINUS_SRC_ALPHA,
-        );
+            gl.enable(gl::BLEND);
+            gl.blend_func_separate(
+                gl::SRC_ALPHA,
+                gl::ONE_MINUS_SRC_ALPHA,
+                gl::ONE,
+                gl::ONE_MINUS_SRC_ALPHA,
+            );
+        }
 
         let swap_chains = SwapChains::new();
         let layer_manager = None;
 
         let shader = GlWindowShader::new(gl.clone(), window.get_mode());
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+        debug_assert_eq!(unsafe { gl.get_error() }, gl::NO_ERROR);
 
         Ok(GlWindowDevice {
             gl,
@@ -411,32 +425,34 @@ impl GlWindowDevice {
 
     fn blit_texture(
         &self,
-        texture_id: GLuint,
-        texture_target: GLuint,
+        texture_id: Option<gl::NativeTexture>,
+        texture_target: u32,
         texture_size: Size2D<i32, UnknownUnit>,
         window_size: Size2D<i32, Viewport>,
     ) {
-        self.gl
-            .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
-        self.gl.framebuffer_texture_2d(
-            gl::READ_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            texture_target,
-            texture_id,
-            0,
-        );
-        self.gl.blit_framebuffer(
-            0,
-            0,
-            texture_size.width,
-            texture_size.height,
-            0,
-            0,
-            window_size.width,
-            window_size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::NEAREST,
-        );
+        unsafe {
+            self.gl
+                .bind_framebuffer(gl::READ_FRAMEBUFFER, self.read_fbo);
+            self.gl.framebuffer_texture_2d(
+                gl::READ_FRAMEBUFFER,
+                gl::COLOR_ATTACHMENT0,
+                texture_target,
+                texture_id,
+                0,
+            );
+            self.gl.blit_framebuffer(
+                0,
+                0,
+                texture_size.width,
+                texture_size.height,
+                0,
+                0,
+                window_size.width,
+                window_size.height,
+                gl::COLOR_BUFFER_BIT,
+                gl::NEAREST,
+            );
+        }
     }
 
     fn layer_manager(&mut self) -> Result<&mut LayerManager, Error> {
@@ -584,16 +600,16 @@ impl GlWindowDevice {
 
 struct GlWindowShader {
     gl: Rc<Gl>,
-    buffer: GLuint,
-    vao: GLuint,
-    program: GLuint,
+    buffer: Option<gl::NativeBuffer>,
+    vao: Option<gl::NativeVertexArray>,
+    program: gl::NativeProgram,
     mode: GlWindowMode,
 }
 
-const VERTEX_ATTRIBUTE: GLuint = 0;
+const VERTEX_ATTRIBUTE: u32 = 0;
 const VERTICES: &[[f32; 2]; 4] = &[[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]];
 
-const PASSTHROUGH_VERTEX_SHADER: &[u8] = b"
+const PASSTHROUGH_VERTEX_SHADER: &str = "
   #version 330 core
   layout(location=0) in vec2 coord;
   out vec2 vTexCoord;
@@ -603,7 +619,7 @@ const PASSTHROUGH_VERTEX_SHADER: &[u8] = b"
   }
 ";
 
-const PASSTHROUGH_FRAGMENT_SHADER: &[u8] = b"
+const PASSTHROUGH_FRAGMENT_SHADER: &str = "
   #version 330 core
   layout(location=0) out vec4 color;
   uniform sampler2D image;
@@ -613,7 +629,7 @@ const PASSTHROUGH_FRAGMENT_SHADER: &[u8] = b"
   }
 ";
 
-const ANAGLYPH_VERTEX_SHADER: &[u8] = b"
+const ANAGLYPH_VERTEX_SHADER: &str = "
   #version 330 core
   layout(location=0) in vec2 coord;
   uniform float wasted; // What fraction of the image is wasted?
@@ -627,7 +643,7 @@ const ANAGLYPH_VERTEX_SHADER: &[u8] = b"
   }
 ";
 
-const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &[u8] = b"
+const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &str = "
   #version 330 core
   layout(location=0) out vec4 color;
   uniform sampler2D image;
@@ -643,7 +659,7 @@ const ANAGLYPH_RED_CYAN_FRAGMENT_SHADER: &[u8] = b"
   }
 ";
 
-const SPHERICAL_VERTEX_SHADER: &[u8] = b"
+const SPHERICAL_VERTEX_SHADER: &str = "
   #version 330 core
   layout(location=0) in vec2 coord;
   out vec2 lon_lat;
@@ -654,7 +670,7 @@ const SPHERICAL_VERTEX_SHADER: &[u8] = b"
   }
 ";
 
-const SPHERICAL_FRAGMENT_SHADER: &[u8] = b"
+const SPHERICAL_FRAGMENT_SHADER: &str = "
   #version 330 core
   layout(location=0) out vec4 color;
   uniform sampler2D image;
@@ -716,137 +732,140 @@ impl GlWindowShader {
             log::warn!("XR shaders may not render on MacOS.");
         }
 
-        // The four corners of the window in a VAO, set to attribute 0
-        let buffer = gl.gen_buffers(1)[0];
-        let vao = gl.gen_vertex_arrays(1)[0];
-        gl.bind_buffer(gl::ARRAY_BUFFER, buffer);
         unsafe {
-            gl.buffer_data(
-                gl::ARRAY_BUFFER,
-                std::mem::size_of_val(VERTICES) as isize,
-                VERTICES as *const _ as *const c_void,
-                gl::STATIC_DRAW,
-            )
-        };
-        gl.bind_vertex_array(vao);
-        gl.vertex_attrib_pointer(
-            VERTEX_ATTRIBUTE,
-            VERTICES[0].len() as i32,
-            gl::FLOAT,
-            false,
-            0,
-            0,
-        );
-        gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+            // The four corners of the window in a VAO, set to attribute 0
+            let buffer = gl.create_buffer().ok();
+            let vao = gl.create_vertex_array().ok();
+            gl.bind_buffer(gl::ARRAY_BUFFER, buffer);
 
-        // The shader program
-        let program = gl.create_program();
-        let vertex_shader = gl.create_shader(gl::VERTEX_SHADER);
-        let fragment_shader = gl.create_shader(gl::FRAGMENT_SHADER);
-        gl.shader_source(vertex_shader, &[vertex_source]);
-        gl.compile_shader(vertex_shader);
-        gl.attach_shader(program, vertex_shader);
-        gl.shader_source(fragment_shader, &[fragment_source]);
-        gl.compile_shader(fragment_shader);
-        gl.attach_shader(program, fragment_shader);
-        gl.link_program(program);
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+            let data =
+                slice::from_raw_parts(VERTICES as *const _ as _, std::mem::size_of_val(VERTICES));
+            gl.buffer_data_u8_slice(gl::ARRAY_BUFFER, data, gl::STATIC_DRAW);
 
-        // Check for errors
-        // TODO: something other than panic?
-        let mut status = [0];
-        unsafe { gl.get_shader_iv(vertex_shader, gl::COMPILE_STATUS, &mut status) };
-        assert_eq!(
-            status[0],
-            gl::TRUE as i32,
-            "Failed to compile vertex shader: {}",
-            gl.get_shader_info_log(vertex_shader)
-        );
-        unsafe { gl.get_shader_iv(fragment_shader, gl::COMPILE_STATUS, &mut status) };
-        assert_eq!(
-            status[0],
-            gl::TRUE as i32,
-            "Failed to compile fragment shader: {}",
-            gl.get_shader_info_log(fragment_shader)
-        );
-        unsafe { gl.get_program_iv(program, gl::LINK_STATUS, &mut status) };
-        assert_eq!(
-            status[0],
-            gl::TRUE as i32,
-            "Failed to link: {}",
-            gl.get_program_info_log(program)
-        );
+            gl.bind_vertex_array(vao);
+            gl.vertex_attrib_pointer_f32(
+                VERTEX_ATTRIBUTE,
+                VERTICES[0].len() as i32,
+                gl::FLOAT,
+                false,
+                0,
+                0,
+            );
+            gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
+            debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
-        // Clean up
-        gl.delete_shader(vertex_shader);
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
-        gl.delete_shader(fragment_shader);
-        debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+            // The shader program
+            let program = gl.create_program().unwrap();
+            let vertex_shader = gl.create_shader(gl::VERTEX_SHADER).unwrap();
+            let fragment_shader = gl.create_shader(gl::FRAGMENT_SHADER).unwrap();
+            gl.shader_source(vertex_shader, vertex_source);
+            gl.compile_shader(vertex_shader);
+            gl.attach_shader(program, vertex_shader);
+            gl.shader_source(fragment_shader, fragment_source);
+            gl.compile_shader(fragment_shader);
+            gl.attach_shader(program, fragment_shader);
+            gl.link_program(program);
+            debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
 
-        // And we're done
-        Some(GlWindowShader {
-            gl,
-            buffer,
-            vao,
-            program,
-            mode,
-        })
+            // Check for errors
+            // TODO: something other than panic?
+            let status = gl.get_shader_compile_status(vertex_shader);
+            assert!(
+                status,
+                "Failed to compile vertex shader: {}",
+                gl.get_shader_info_log(vertex_shader)
+            );
+            let status = gl.get_shader_compile_status(fragment_shader);
+            assert!(
+                status,
+                "Failed to compile fragment shader: {}",
+                gl.get_shader_info_log(fragment_shader)
+            );
+            let status = gl.get_program_link_status(program);
+            assert!(
+                status,
+                "Failed to link: {}",
+                gl.get_program_info_log(program)
+            );
+
+            // Clean up
+            gl.delete_shader(vertex_shader);
+            debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+            gl.delete_shader(fragment_shader);
+            debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
+
+            // And we're done
+            Some(GlWindowShader {
+                gl,
+                buffer,
+                vao,
+                program,
+                mode,
+            })
+        }
     }
 
     fn draw_texture(
         &self,
-        texture_id: GLuint,
-        texture_target: GLuint,
+        texture_id: Option<gl::NativeTexture>,
+        texture_target: u32,
         texture_size: Size2D<i32, UnknownUnit>,
         viewport_size: Size2D<i32, Viewport>,
         window_size: Size2D<i32, Viewport>,
     ) {
-        self.gl.use_program(self.program);
+        unsafe {
+            self.gl.use_program(Some(self.program));
 
-        self.gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
-        self.gl.vertex_attrib_pointer(
-            VERTEX_ATTRIBUTE,
-            VERTICES[0].len() as i32,
-            gl::FLOAT,
-            false,
-            0,
-            0,
-        );
+            self.gl.enable_vertex_attrib_array(VERTEX_ATTRIBUTE);
+            self.gl.vertex_attrib_pointer_f32(
+                VERTEX_ATTRIBUTE,
+                VERTICES[0].len() as i32,
+                gl::FLOAT,
+                false,
+                0,
+                0,
+            );
 
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
 
-        self.gl.active_texture(gl::TEXTURE0);
-        self.gl.bind_texture(texture_target, texture_id);
+            self.gl.active_texture(gl::TEXTURE0);
+            self.gl.bind_texture(texture_target, texture_id);
 
-        match self.mode {
-            GlWindowMode::StereoRedCyan => {
-                let wasted = 1.0
-                    - (texture_size.width as f32 / viewport_size.width as f32)
-                        .max(0.0)
-                        .min(1.0);
-                let wasted_location = self.gl.get_uniform_location(self.program, "wasted");
-                self.gl.uniform_1f(wasted_location, wasted);
+            match self.mode {
+                GlWindowMode::StereoRedCyan => {
+                    let wasted = 1.0
+                        - (texture_size.width as f32 / viewport_size.width as f32)
+                            .max(0.0)
+                            .min(1.0);
+                    let wasted_location = self.gl.get_uniform_location(self.program, "wasted");
+                    self.gl.uniform_1_f32(wasted_location.as_ref(), wasted);
+                }
+                GlWindowMode::Blit
+                | GlWindowMode::Cubemap
+                | GlWindowMode::Spherical
+                | GlWindowMode::StereoLeftRight => {}
             }
-            GlWindowMode::Blit
-            | GlWindowMode::Cubemap
-            | GlWindowMode::Spherical
-            | GlWindowMode::StereoLeftRight => {}
-        }
 
-        self.gl
-            .viewport(0, 0, window_size.width, window_size.height);
-        self.gl
-            .draw_arrays(gl::TRIANGLE_STRIP, 0, VERTICES.len() as i32);
-        self.gl.disable_vertex_attrib_array(VERTEX_ATTRIBUTE);
-        debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+            self.gl
+                .viewport(0, 0, window_size.width, window_size.height);
+            self.gl
+                .draw_arrays(gl::TRIANGLE_STRIP, 0, VERTICES.len() as i32);
+            self.gl.disable_vertex_attrib_array(VERTEX_ATTRIBUTE);
+            debug_assert_eq!(self.gl.get_error(), gl::NO_ERROR);
+        }
     }
 }
 
 impl Drop for GlWindowShader {
     fn drop(&mut self) {
-        self.gl.delete_buffers(&[self.buffer]);
-        self.gl.delete_vertex_arrays(&[self.vao]);
-        self.gl.delete_program(self.program);
+        unsafe {
+            if let Some(buffer) = self.buffer {
+                self.gl.delete_buffer(buffer);
+            }
+            if let Some(vao) = self.vao {
+                self.gl.delete_vertex_array(vao);
+            }
+            self.gl.delete_program(self.program);
+        }
     }
 }

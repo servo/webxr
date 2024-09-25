@@ -289,6 +289,7 @@ pub struct SubImages {
 #[cfg_attr(feature = "ipc", derive(Deserialize, Serialize))]
 pub struct SubImage {
     pub color_texture: u32,
+    // TODO: make this Option<NonZeroU32>
     pub depth_stencil_texture: Option<u32>,
     pub texture_array_index: Option<u32>,
     pub viewport: Rect<i32, Viewport>,

@@ -33,7 +33,7 @@ euclid = "0.22"
 log = "0.4.6"
 openxr = { version = "0.19", optional = true }
 serde = { version = "1.0", optional = true }
-sparkle = "0.1"
+glow = "0.14.2"
 surfman = { version = "0.9", features = ["chains"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
