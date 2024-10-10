@@ -1,6 +1,6 @@
 name: Rust
 
-on: 
+on:
   push:
     branches: [main]
   pull_request:
@@ -14,45 +14,45 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@stable
-    - name: fmt check
-      run: cargo fmt --all -- --check
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: fmt check
+        run: cargo fmt --all -- --check
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@stable
-    - name: build
-      run: |
-        cd webxr
-        cargo build --features=glwindow,headless
-        cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: |
+          cd webxr
+          cargo build --features=glwindow,headless
+          cargo build --features=ipc,glwindow,headless
+          cargo build --features=glwindow,headless
   mac:
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@stable
-    - name: build
-      run: |
-        cd webxr
-        cargo build --features=glwindow,headless
-        cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: |
+          cd webxr
+          cargo build --features=glwindow,headless
+          cargo build --features=ipc,glwindow,headless
+          cargo build --features=glwindow,headless
   win:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@stable
-    - name: build
-      run: |
-        cd webxr
-        cargo build --features=glwindow,headless
-        cargo build --features=ipc,glwindow,headless
-        cargo build --features=glwindow,headless
-        rustup target add aarch64-pc-windows-msvc
-        cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
+      - uses: actions/checkout@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: |
+          cd webxr
+          cargo build --features=glwindow,headless
+          cargo build --features=ipc,glwindow,headless
+          cargo build --features=glwindow,headless
+          rustup target add aarch64-pc-windows-msvc
+          cargo build --target=aarch64-pc-windows-msvc --features ipc,openxr-api
   build_result:
     name: Result
     runs-on: ubuntu-latest
