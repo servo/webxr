@@ -19,7 +19,7 @@ jobs:
     - name: fmt check
       run: cargo fmt --all -- --check
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v2
     - uses: dtolnay/rust-toolchain@stable
