@@ -339,7 +339,7 @@ pub static VALVE_INDEX_CONTROLLER_PROFILE: InteractionProfile = InteractionProfi
 
 pub static EXT_HAND_INTERACTION_PROFILE: InteractionProfile = InteractionProfile {
     profile_type: InteractionProfileType::ExtHandInteraction,
-    path: "interaction_profiles/ext/hand_interaction_ext",
+    path: "/interaction_profiles/ext/hand_interaction_ext",
     required_extension: Some(EXT_HAND_INTERACTION_EXTENSION_NAME),
     standard_buttons: &["pinch_ext/value", "", "", ""],
     standard_axes: &["", "", "", ""],
