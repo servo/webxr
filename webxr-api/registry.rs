@@ -66,8 +66,7 @@ struct MainThreadWakerImpl {
 impl MainThreadWakerImpl {
     fn new(waker: Box<dyn MainThreadWaker>) -> Result<MainThreadWakerImpl, Error> {
         let (sender, receiver) = crate::channel().or(Err(Error::CommunicationError))?;
-        ipc_channel::router::ROUTER
-            .add_typed_route(receiver, Box::new(move |_| waker.wake()));
+        ipc_channel::router::ROUTER.add_typed_route(receiver, Box::new(move |_| waker.wake()));
         Ok(MainThreadWakerImpl { sender })
     }
 
