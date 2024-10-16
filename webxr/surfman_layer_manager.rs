@@ -174,7 +174,7 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                     .iter()
                     .map(|&viewport| SubImage {
                         color_texture,
-                        depth_stencil_texture: depth_stencil_texture.map(|nt| nt.0.get()),
+                        depth_stencil_texture: depth_stencil_texture.map(|texture| texture.0.get()),
                         texture_array_index,
                         viewport,
                     })
