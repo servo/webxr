@@ -132,7 +132,7 @@ impl GlClearer {
             // Clear it
             gl.bind_framebuffer(gl::FRAMEBUFFER, fbo);
             gl.clear_color(0., 0., 0., 1.);
-            gl.clear_depth_f64(1.);
+            gl.clear_depth(1.);
             gl.clear_stencil(0);
             gl.disable(gl::SCISSOR_TEST);
             gl.disable(gl::RASTERIZER_DISCARD);
@@ -151,7 +151,7 @@ impl GlClearer {
                 clear_color[3],
             );
             gl.color_mask(color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
-            gl.clear_depth_f64(clear_depth[0] as f64);
+            gl.clear_depth(clear_depth[0] as f64);
             gl.clear_stencil(clear_stencil[0]);
             gl.depth_mask(depth_mask);
             gl.stencil_mask(stencil_mask[0] as _);

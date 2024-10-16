@@ -33,9 +33,13 @@ euclid = "0.22"
 log = "0.4.6"
 openxr = { version = "0.19", optional = true }
 serde = { version = "1.0", optional = true }
-glow = "0.14.2"
+glow = "0.15"
 surfman = { version = "0.9", features = ["chains"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = ["dxgi", "d3d11", "winerror"], optional = true }
+winapi = { version = "0.3", features = [
+    "dxgi",
+    "d3d11",
+    "winerror",
+], optional = true }
 wio = { version = "0.2", optional = true }
