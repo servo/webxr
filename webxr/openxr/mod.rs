@@ -801,7 +801,9 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                     })?;
                 let color_texture = device.surface_texture_object(color_surface_texture);
                 let color_target = device.surface_gl_texture_target();
-                let depth_stencil_texture = openxr_layer.depth_stencil_texture.map(|texture| texture.0.get());
+                let depth_stencil_texture = openxr_layer
+                    .depth_stencil_texture
+                    .map(|texture| texture.0.get());
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
                 let texture_size = openxr_layer.size;
