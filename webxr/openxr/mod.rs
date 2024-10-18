@@ -9,6 +9,7 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
+use glow::{self as gl, HasContext};
 use interaction_profiles::{get_profiles_from_path, get_supported_interaction_profiles};
 use log::{error, warn};
 use openxr::sys::CompositionLayerPassthroughFB;
@@ -20,10 +21,9 @@ use openxr::{
     ReferenceSpaceType, SecondaryEndInfo, Session, Space, Swapchain, SwapchainCreateFlags,
     SwapchainCreateInfo, SwapchainUsageFlags, SystemId, Vector3f, Version, ViewConfigurationType,
 };
-use sparkle::gl;
-use sparkle::gl::GLuint;
 use std::collections::HashMap;
 use std::mem;
+use std::num::NonZeroU32;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -425,7 +425,7 @@ struct OpenXrLayerManager {
 
 struct OpenXrLayer {
     swapchain: Swapchain<Backend>,
-    depth_stencil_texture: Option<GLuint>,
+    depth_stencil_texture: Option<gl::NativeTexture>,
     size: Size2D<i32, Viewport>,
     images: Vec<<Backend as Graphics>::SwapchainImage>,
     surface_textures: Vec<Option<SurfaceTexture>>,
@@ -460,7 +460,7 @@ impl OpenXrLayerManager {
 impl OpenXrLayer {
     fn new(
         swapchain: Swapchain<Backend>,
-        depth_stencil_texture: Option<GLuint>,
+        depth_stencil_texture: Option<gl::NativeTexture>,
         size: Size2D<i32, Viewport>,
     ) -> Result<OpenXrLayer, Error> {
         let images = swapchain
@@ -547,20 +547,22 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
             let gl = contexts
                 .bindings(device, context_id)
                 .ok_or(Error::NoMatchingDevice)?;
-            let depth_stencil_texture = gl.gen_textures(1)[0];
-            gl.bind_texture(gl::TEXTURE_2D, depth_stencil_texture);
-            gl.tex_image_2d(
-                gl::TEXTURE_2D,
-                0,
-                gl::DEPTH24_STENCIL8 as _,
-                texture_size.width,
-                texture_size.height,
-                0,
-                gl::DEPTH_STENCIL,
-                gl::UNSIGNED_INT_24_8,
-                gl::TexImageSource::Pixels(None),
-            );
-            Some(depth_stencil_texture)
+            unsafe {
+                let depth_stencil_texture = gl.create_texture().ok();
+                gl.bind_texture(gl::TEXTURE_2D, depth_stencil_texture);
+                gl.tex_image_2d(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::DEPTH24_STENCIL8 as _,
+                    texture_size.width,
+                    texture_size.height,
+                    0,
+                    gl::DEPTH_STENCIL,
+                    gl::UNSIGNED_INT_24_8,
+                    None,
+                );
+                depth_stencil_texture
+            }
         } else {
             None
         };
@@ -585,7 +587,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
         if let Some(mut layer) = self.openxr_layers.remove(&layer_id) {
             if let Some(depth_stencil_texture) = layer.depth_stencil_texture {
                 let gl = contexts.bindings(device, context_id).unwrap();
-                gl.delete_textures(&[depth_stencil_texture]);
+                unsafe { gl.delete_texture(depth_stencil_texture) };
             }
             let mut context = contexts
                 .context(device, context_id)
@@ -799,7 +801,9 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                     })?;
                 let color_texture = device.surface_texture_object(color_surface_texture);
                 let color_target = device.surface_gl_texture_target();
-                let depth_stencil_texture = openxr_layer.depth_stencil_texture;
+                let depth_stencil_texture = openxr_layer
+                    .depth_stencil_texture
+                    .map(|texture| texture.0.get());
                 let texture_array_index = None;
                 let origin = Point2D::new(0, 0);
                 let texture_size = openxr_layer.size;
@@ -825,9 +829,9 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                     contexts,
                     context_id,
                     layer_id,
-                    color_texture,
+                    NonZeroU32::new(color_texture).map(glow::NativeTexture),
                     color_target,
-                    depth_stencil_texture,
+                    openxr_layer.depth_stencil_texture,
                 );
                 Ok(SubImages {
                     layer_id,
