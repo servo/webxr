@@ -9,6 +9,7 @@ use euclid::Rotation3D;
 use euclid::Size2D;
 use euclid::Transform3D;
 use euclid::Vector3D;
+use glow::PixelUnpackData;
 use glow::{self as gl, HasContext};
 use interaction_profiles::{get_profiles_from_path, get_supported_interaction_profiles};
 use log::{error, warn};
@@ -559,7 +560,7 @@ impl LayerManagerAPI<SurfmanGL> for OpenXrLayerManager {
                     0,
                     gl::DEPTH_STENCIL,
                     gl::UNSIGNED_INT_24_8,
-                    None,
+                    PixelUnpackData::Slice(None),
                 );
                 depth_stencil_texture
             }

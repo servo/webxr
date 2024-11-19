@@ -6,7 +6,7 @@
 
 use crate::gl_utils::GlClearer;
 use euclid::{Point2D, Rect, Size2D};
-use glow::{self as gl, Context as Gl, HasContext};
+use glow::{self as gl, Context as Gl, HasContext, PixelUnpackData};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use surfman::chains::{PreserveBuffer, SwapChains, SwapChainsAPI};
@@ -87,7 +87,7 @@ impl LayerManagerAPI<SurfmanGL> for SurfmanLayerManager {
                     0,
                     gl::DEPTH_STENCIL,
                     gl::UNSIGNED_INT_24_8,
-                    None,
+                    PixelUnpackData::Slice(None),
                 );
             }
             self.depth_stencil_textures
