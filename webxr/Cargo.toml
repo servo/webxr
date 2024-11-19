@@ -33,8 +33,8 @@ euclid = "0.22"
 log = "0.4.6"
 openxr = { version = "0.19", optional = true }
 serde = { version = "1.0", optional = true }
-glow = "0.15"
-surfman = { git = "https://github.com/servo/surfman", rev = "e0c34af64f2860bc56bc8a56e1c169a915b16aa3", features = [
+glow = "0.16"
+surfman = { git = "https://github.com/servo/surfman", rev = "c8d6b4b65aeab739ee7651602e29c8d58ceee123", features = [
     "chains",
 ] }
 
