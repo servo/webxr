@@ -2,15 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::gl_utils::framebuffer;
 use crate::{SurfmanGL, SurfmanLayerManager};
 use core::slice;
 use euclid::{
     Angle, Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, UnknownUnit, Vector3D,
 };
 use glow::{self as gl, Context as Gl, HasContext};
-use std::ffi::c_void;
-use std::num::NonZeroU32;
 use std::rc::Rc;
 use surfman::chains::{PreserveBuffer, SwapChain, SwapChainAPI, SwapChains, SwapChainsAPI};
 use surfman::{
@@ -214,10 +211,10 @@ impl DeviceAPI for GlWindowDevice {
             .context_surface_info(&self.context)
             .unwrap()
             .map(|info| info.framebuffer_object)
-            .unwrap_or(0);
+            .flatten();
         unsafe {
             self.gl
-                .bind_framebuffer(gl::FRAMEBUFFER, framebuffer(framebuffer_object));
+                .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
             debug_assert_eq!(
                 (
                     self.gl.get_error(),
@@ -245,10 +242,9 @@ impl DeviceAPI for GlWindowDevice {
                 .device
                 .create_surface_texture(&mut self.context, surface)
                 .unwrap();
-            let raw_texture_id = self.device.surface_texture_object(&surface_texture);
-            let texture_id = NonZeroU32::new(raw_texture_id).map(gl::NativeTexture);
+            let texture_id = self.device.surface_texture_object(&surface_texture);
             let texture_target = self.device.surface_gl_texture_target();
-            log::debug!("Presenting texture {}", raw_texture_id);
+            log::debug!("Presenting texture {:?}", texture_id);
 
             if let Some(ref shader) = self.shader {
                 shader.draw_texture(
@@ -384,8 +380,8 @@ impl GlWindowDevice {
                 .context_surface_info(&context)
                 .unwrap()
                 .map(|info| info.framebuffer_object)
-                .unwrap_or(0);
-            gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer(framebuffer_object));
+                .flatten();
+            gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
             debug_assert_eq!(
                 (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
                 (gl::NO_ERROR, gl::FRAMEBUFFER_COMPLETE)
