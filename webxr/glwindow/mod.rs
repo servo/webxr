@@ -9,13 +9,12 @@ use euclid::{
     Angle, Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, UnknownUnit, Vector3D,
 };
 use glow::{self as gl, Context as Gl, HasContext};
-use std::ffi::c_void;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use surfman::chains::{PreserveBuffer, SwapChain, SwapChainAPI, SwapChains, SwapChainsAPI};
 use surfman::{
-    Adapter, Connection, Context as SurfmanContext, ContextAttributes, Device as SurfmanDevice,
-    GLApi, NativeWidget, SurfaceAccess, SurfaceType,
+    Adapter, Connection, Context as SurfmanContext, ContextAttributeFlags, ContextAttributes,
+    Device as SurfmanDevice, GLApi, GLVersion, NativeWidget, SurfaceAccess, SurfaceType,
 };
 use webxr_api::util::ClipPlanes;
 use webxr_api::{
@@ -72,21 +71,26 @@ pub struct GlWindowDiscovery {
     connection: Connection,
     adapter: Adapter,
     context_attributes: ContextAttributes,
-    factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
+    window: Rc<dyn GlWindow>,
 }
 
 impl GlWindowDiscovery {
-    pub fn new(
-        connection: Connection,
-        adapter: Adapter,
-        context_attributes: ContextAttributes,
-        factory: Box<dyn Fn() -> Result<Box<dyn GlWindow>, ()>>,
-    ) -> GlWindowDiscovery {
+    pub fn new(window: Rc<dyn GlWindow>) -> GlWindowDiscovery {
+        let connection = Connection::new().unwrap();
+        let adapter = connection.create_adapter().unwrap();
+        let flags = ContextAttributeFlags::ALPHA
+            | ContextAttributeFlags::DEPTH
+            | ContextAttributeFlags::STENCIL;
+        let version = match connection.gl_api() {
+            GLApi::GLES => GLVersion { major: 3, minor: 0 },
+            GLApi::GL => GLVersion { major: 3, minor: 2 },
+        };
+        let context_attributes = ContextAttributes { flags, version };
         GlWindowDiscovery {
             connection,
             adapter,
             context_attributes,
-            factory,
+            window,
         }
     }
 }
@@ -103,7 +107,7 @@ impl DiscoveryAPI<SurfmanGL> for GlWindowDiscovery {
             let connection = self.connection.clone();
             let adapter = self.adapter.clone();
             let context_attributes = self.context_attributes.clone();
-            let window = (self.factory)().or(Err(Error::NoMatchingDevice))?;
+            let window = self.window.clone();
             xr.run_on_main_thread(move |grand_manager| {
                 GlWindowDevice::new(
                     connection,
@@ -128,7 +132,7 @@ pub struct GlWindowDevice {
     device: SurfmanDevice,
     context: SurfmanContext,
     gl: Rc<Gl>,
-    window: Box<dyn GlWindow>,
+    window: Rc<dyn GlWindow>,
     grand_manager: LayerGrandManager<SurfmanGL>,
     layer_manager: Option<LayerManager>,
     target_swap_chain: Option<SwapChain<SurfmanDevice>>,
@@ -339,7 +343,7 @@ impl GlWindowDevice {
         connection: Connection,
         adapter: Adapter,
         context_attributes: ContextAttributes,
-        window: Box<dyn GlWindow>,
+        window: Rc<dyn GlWindow>,
         granted_features: Vec<String>,
         grand_manager: LayerGrandManager<SurfmanGL>,
     ) -> Result<GlWindowDevice, Error> {
