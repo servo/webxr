@@ -9,6 +9,7 @@ use euclid::{
     Angle, Point2D, Rect, RigidTransform3D, Rotation3D, Size2D, Transform3D, UnknownUnit, Vector3D,
 };
 use glow::{self as gl, Context as Gl, HasContext};
+use raw_window_handle::DisplayHandle;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use surfman::chains::{PreserveBuffer, SwapChain, SwapChainAPI, SwapChains, SwapChainsAPI};
@@ -51,6 +52,7 @@ pub trait GlWindow {
     fn get_mode(&self) -> GlWindowMode {
         GlWindowMode::Blit
     }
+    fn display_handle(&self) -> DisplayHandle;
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -76,7 +78,7 @@ pub struct GlWindowDiscovery {
 
 impl GlWindowDiscovery {
     pub fn new(window: Rc<dyn GlWindow>) -> GlWindowDiscovery {
-        let connection = Connection::new().unwrap();
+        let connection = Connection::from_display_handle(window.display_handle()).unwrap();
         let adapter = connection.create_adapter().unwrap();
         let flags = ContextAttributeFlags::ALPHA
             | ContextAttributeFlags::DEPTH

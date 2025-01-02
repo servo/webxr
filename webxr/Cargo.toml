@@ -34,8 +34,10 @@ log = "0.4.6"
 openxr = { version = "0.19", optional = true }
 serde = { version = "1.0", optional = true }
 glow = "0.16"
+raw-window-handle = "0.6"
 surfman = { git = "https://github.com/servo/surfman", rev = "300789ddbda45c89e9165c31118bf1c4c07f89f6", features = [
     "chains",
+    "sm-raw-window-handle-06",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
