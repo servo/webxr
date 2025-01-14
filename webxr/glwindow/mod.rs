@@ -217,8 +217,7 @@ impl DeviceAPI for GlWindowDevice {
             .device
             .context_surface_info(&self.context)
             .unwrap()
-            .map(|info| info.framebuffer_object)
-            .flatten();
+            .and_then(|info| info.framebuffer_object);
         unsafe {
             self.gl
                 .bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
@@ -386,8 +385,7 @@ impl GlWindowDevice {
             let framebuffer_object = device
                 .context_surface_info(&context)
                 .unwrap()
-                .map(|info| info.framebuffer_object)
-                .flatten();
+                .and_then(|info| info.framebuffer_object);
             gl.bind_framebuffer(gl::FRAMEBUFFER, framebuffer_object);
             debug_assert_eq!(
                 (gl.get_error(), gl.check_framebuffer_status(gl::FRAMEBUFFER)),
