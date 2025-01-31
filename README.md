@@ -1,6 +1,4 @@
-# rust-webxr
-
-[![Build Status](https://github.com/servo/webxr/actions/workflows/rust.yml/badge.svg)](https://github.com/servo/webxr/actions)
+# Moved in servo/[components/webxr](https://github.com/servo/servo/tree/5466c27f6f9a151ae7f5357cb663cc2580fbca15/components/webxr) with https://github.com/servo/servo/pull/35228
 
 A safe Rust API that provides a way to interact with virtual reality and
 augmented reality devices and integration with OpenXR. The API is inspired by
